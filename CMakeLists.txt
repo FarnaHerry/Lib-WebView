@@ -75,6 +75,12 @@ huxerui_add_library(webview
             huxerui
 )
 
+add_library(HuxerUI::WebView ALIAS webview)
+
+if (HUXERUI_LIBRARY_GRAPH_ONLY)
+    return()
+endif ()
+
 target_include_directories(webview PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:include>"
@@ -126,5 +132,3 @@ if (WIN32)
     target_compile_definitions(webview PRIVATE NOMINMAX UNICODE _UNICODE WEBVIEW2_STATIC)
     target_link_libraries(webview PRIVATE "${WEBVIEW2_LOADER_LIBRARY}" Shlwapi)
 endif ()
-
-add_library(HuxerUI::WebView ALIAS webview)

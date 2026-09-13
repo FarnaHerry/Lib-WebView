@@ -7,43 +7,54 @@
 
 namespace huxerui {
 
-PlatformPayload WebViewRequest::Encode(const WebViewRequest& value) {
+PlatformPayload WebViewRequest::Encode(const WebViewRequest &value) {
   PlatformPayload::Object headers;
-  for (const auto& [name, content] : value.headers) {
+  for (const auto &[name, content] : value.headers) {
     headers.emplace(name, content);
   }
   return PlatformPayload::Object{
-      {"body", value.body.has_value() ? PlatformPayload(*value.body) : PlatformPayload{}},
+      {"body", value.body.has_value() ? PlatformPayload(*value.body)
+                                      : PlatformPayload{}},
       {"headers", std::move(headers)},
       {"method", value.method},
       {"url", value.url},
   };
 }
 
-PlatformPayload WebViewHtml::Encode(const WebViewHtml& value) {
+PlatformPayload WebViewHtml::Encode(const WebViewHtml &value) {
   return PlatformPayload::Object{
       {"baseUrl", value.base_url},
       {"content", value.content},
   };
 }
 
-PlatformPayload WebViewProperties::Encode(const WebViewProperties& value) {
+PlatformPayload WebViewProperties::Encode(const WebViewProperties &value) {
   return PlatformPayload::Object{
+      {"backgroundColor",
+       PlatformPayload::Object{
+           {"alpha", static_cast<double>(value.background_color.alpha)},
+           {"blue", static_cast<double>(value.background_color.blue)},
+           {"green", static_cast<double>(value.background_color.green)},
+           {"red", static_cast<double>(value.background_color.red)},
+       }},
+      {"domStorageEnabled", value.dom_storage_enabled},
       {"javaScriptEnabled", value.java_script_enabled},
       {"url", value.url},
   };
 }
 
-WebViewNavigationRequest WebViewNavigationRequest::Decode(const PlatformPayload& payload) {
-  const PlatformPayload::Object& fields = payload.AsObject();
+WebViewNavigationRequest
+WebViewNavigationRequest::Decode(const PlatformPayload &payload) {
+  const PlatformPayload::Object &fields = payload.AsObject();
   return {
       .url = std::string(fields.at("url").AsString()),
       .is_main_frame = fields.at("isMainFrame").AsBoolean(),
   };
 }
 
-WebViewNavigationState WebViewNavigationState::Decode(const PlatformPayload& payload) {
-  const PlatformPayload::Object& fields = payload.AsObject();
+WebViewNavigationState
+WebViewNavigationState::Decode(const PlatformPayload &payload) {
+  const PlatformPayload::Object &fields = payload.AsObject();
   return {
       .url = std::string(fields.at("url").AsString()),
       .title = std::string(fields.at("title").AsString()),
@@ -54,13 +65,15 @@ WebViewNavigationState WebViewNavigationState::Decode(const PlatformPayload& pay
   };
 }
 
-WebViewLoadError WebViewLoadError::Decode(const PlatformPayload& payload) {
-  const PlatformPayload::Object& fields = payload.AsObject();
-  const PlatformPayload& url = fields.at("url");
+WebViewLoadError WebViewLoadError::Decode(const PlatformPayload &payload) {
+  const PlatformPayload::Object &fields = payload.AsObject();
+  const PlatformPayload &url = fields.at("url");
   return {
       .code = std::string(fields.at("code").AsString()),
       .message = std::string(fields.at("message").AsString()),
-      .url = url.IsNull() ? std::nullopt : std::optional<std::string>{std::string(url.AsString())},
+      .url = url.IsNull()
+                 ? std::nullopt
+                 : std::optional<std::string>{std::string(url.AsString())},
   };
 }
 
@@ -69,11 +82,13 @@ View WebView(WebViewProperties properties) {
 }
 
 View WebView(WebViewProperties properties, WebViewController controller) {
-  return PlatformView(detail::web_view_type, std::move(properties)).Controller(std::move(controller));
+  return PlatformView(detail::web_view_type, std::move(properties))
+      .Controller(std::move(controller));
 }
 
-void InstallWebView(RootContext& root) {
-#if defined(_WIN32) || defined(__ANDROID__) || defined(__APPLE__) || defined(__EMSCRIPTEN__)
+void InstallWebView(RootContext &root) {
+#if defined(_WIN32) || defined(__ANDROID__) || defined(__APPLE__) ||           \
+    defined(__EMSCRIPTEN__)
   detail::InstallPlatformWebView(root);
 #else
   static_cast<void>(root);

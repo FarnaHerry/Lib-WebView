@@ -178,6 +178,10 @@ or another bounded parent layout.
 different from the current property value. Write `WebViewNavigationState::url` back to the same state when links,
 redirects, or browser history should become the new controlled value.
 
+Set `dom_storage_enabled` when hosted pages require `localStorage` or
+`sessionStorage`. `background_color` controls the native WebView surface shown
+before the first document paint and between navigations.
+
 Use `LoadUrl` as a convenient imperative GET entry point:
 
 ```cpp

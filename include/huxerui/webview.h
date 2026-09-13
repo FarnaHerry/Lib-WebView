@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include <huxerui/color.h>
 #include <huxerui/event.h>
 #include <huxerui/platform_registry.h>
 #include <huxerui/root.h>
@@ -28,7 +29,8 @@
 ///     .url = "https://example.com",
 ///     .java_script_enabled = true,
 /// }, controller)
-///     .On<WebViewEvents::NavigationChanged>([navigation](const WebViewNavigationState& state) {
+///     .On<WebViewEvents::NavigationChanged>([navigation](const
+///     WebViewNavigationState& state) {
 ///       navigation = state;
 ///     })
 ///     .With(Frame{.min_height = 320.0F});
@@ -58,10 +60,10 @@ struct WebViewRequest {
   /// Optional UTF-8 request body.
   std::optional<std::string> body;
 
-  bool operator==(const WebViewRequest&) const = default;
+  bool operator==(const WebViewRequest &) const = default;
 
   /// Encodes the value for a cross-language PlatformView adapter.
-  [[nodiscard]] static PlatformPayload Encode(const WebViewRequest& value);
+  [[nodiscard]] static PlatformPayload Encode(const WebViewRequest &value);
 };
 
 /// Describes HTML content loaded directly into the WebView.
@@ -73,10 +75,10 @@ struct WebViewHtml {
   /// the platform's blank-document origin.
   std::string base_url;
 
-  bool operator==(const WebViewHtml&) const = default;
+  bool operator==(const WebViewHtml &) const = default;
 
   /// Encodes the value for a cross-language PlatformView adapter.
-  [[nodiscard]] static PlatformPayload Encode(const WebViewHtml& value);
+  [[nodiscard]] static PlatformPayload Encode(const WebViewHtml &value);
 };
 
 /// The complete declarative configuration of a WebView.
@@ -93,10 +95,17 @@ struct WebViewProperties {
   /// Enables page JavaScript. Disabled by default.
   bool java_script_enabled = false;
 
-  bool operator==(const WebViewProperties&) const = default;
+  /// Enables DOM storage APIs such as localStorage and sessionStorage.
+  /// Disabled by default so applications opt in to persistent web content.
+  bool dom_storage_enabled = false;
+
+  /// Native surface color shown before and between document paints.
+  Color background_color = Color::Transparent();
+
+  bool operator==(const WebViewProperties &) const = default;
 
   /// Encodes the value for a cross-language PlatformView adapter.
-  [[nodiscard]] static PlatformPayload Encode(const WebViewProperties& value);
+  [[nodiscard]] static PlatformPayload Encode(const WebViewProperties &value);
 };
 
 /// A navigation that is about to be handled by the platform web engine.
@@ -107,10 +116,11 @@ struct WebViewNavigationRequest {
   /// Whether the navigation targets the main document frame.
   bool is_main_frame = true;
 
-  bool operator==(const WebViewNavigationRequest&) const = default;
+  bool operator==(const WebViewNavigationRequest &) const = default;
 
   /// Decodes a navigation request emitted by a cross-language adapter.
-  [[nodiscard]] static WebViewNavigationRequest Decode(const PlatformPayload& payload);
+  [[nodiscard]] static WebViewNavigationRequest
+  Decode(const PlatformPayload &payload);
 };
 
 /// A coherent snapshot of observable WebView navigation state.
@@ -138,10 +148,11 @@ struct WebViewNavigationState {
   /// Whether `WebViewController::GoForward` can currently navigate history.
   bool can_go_forward = false;
 
-  bool operator==(const WebViewNavigationState&) const = default;
+  bool operator==(const WebViewNavigationState &) const = default;
 
   /// Decodes a navigation snapshot emitted by a cross-language adapter.
-  [[nodiscard]] static WebViewNavigationState Decode(const PlatformPayload& payload);
+  [[nodiscard]] static WebViewNavigationState
+  Decode(const PlatformPayload &payload);
 };
 
 /// Describes a WebView load failure.
@@ -156,10 +167,10 @@ struct WebViewLoadError {
   /// The related URL when the platform can report it.
   std::optional<std::string> url;
 
-  bool operator==(const WebViewLoadError&) const = default;
+  bool operator==(const WebViewLoadError &) const = default;
 
   /// Decodes a load error emitted by a cross-language adapter.
-  [[nodiscard]] static WebViewLoadError Decode(const PlatformPayload& payload);
+  [[nodiscard]] static WebViewLoadError Decode(const PlatformPayload &payload);
 };
 
 /// Typed events emitted by a mounted WebView.
@@ -169,7 +180,7 @@ struct WebViewEvents {
   /// Return `false` to cancel the request. A missing handler allows navigation.
   /// The handler runs on the WebView's owning UI thread and must return without
   /// starting asynchronous decision work.
-  struct NavigationRequested : Event<bool(const WebViewNavigationRequest&)> {
+  struct NavigationRequested : Event<bool(const WebViewNavigationRequest &)> {
     static constexpr std::string_view Name = "navigationRequested";
   };
 
@@ -177,22 +188,22 @@ struct WebViewEvents {
   ///
   /// The event is emitted when observable URL, title, loading, progress, or
   /// history availability changes. Platforms may coalesce native updates.
-  struct NavigationChanged : Event<void(const WebViewNavigationState&)> {
+  struct NavigationChanged : Event<void(const WebViewNavigationState &)> {
     static constexpr std::string_view Name = "navigationChanged";
   };
 
   /// Reports that a top-level load started.
-  struct LoadStarted : Event<void(const WebViewNavigationState&)> {
+  struct LoadStarted : Event<void(const WebViewNavigationState &)> {
     static constexpr std::string_view Name = "loadStarted";
   };
 
   /// Reports that a top-level load completed successfully.
-  struct LoadFinished : Event<void(const WebViewNavigationState&)> {
+  struct LoadFinished : Event<void(const WebViewNavigationState &)> {
     static constexpr std::string_view Name = "loadFinished";
   };
 
   /// Reports that a top-level load failed.
-  struct LoadFailed : Event<void(const WebViewLoadError&)> {
+  struct LoadFailed : Event<void(const WebViewLoadError &)> {
     static constexpr std::string_view Name = "loadFailed";
   };
 
@@ -200,7 +211,7 @@ struct WebViewEvents {
   ///
   /// Treat every message as untrusted input. Availability depends on page
   /// JavaScript being enabled and on the active platform's content policy.
-  struct MessageReceived : Event<void(const std::string&)> {
+  struct MessageReceived : Event<void(const std::string &)> {
     static constexpr std::string_view Name = "messageReceived";
   };
 };
@@ -209,7 +220,8 @@ struct WebViewEvents {
 ///
 /// Successful values contain the platform's JSON representation of the script
 /// result. Failures contain a `PlatformError`.
-using WebViewJavaScriptCompletion = std::function<void(PlatformResult<std::string>)>;
+using WebViewJavaScriptCompletion =
+    std::function<void(PlatformResult<std::string>)>;
 
 class WebViewController;
 
@@ -265,9 +277,10 @@ public:
   bool LoadHtml(WebViewHtml html) const;
 
   /// Evaluates JavaScript in the current document and reports its result.
-  bool EvaluateJavaScript(std::string script, WebViewJavaScriptCompletion completion) const;
+  bool EvaluateJavaScript(std::string script,
+                          WebViewJavaScriptCompletion completion) const;
 
-  bool operator==(const WebViewController&) const = default;
+  bool operator==(const WebViewController &) const = default;
 
 private:
   std::shared_ptr<detail::WebViewControllerState> state_;
@@ -281,8 +294,7 @@ private:
 /// refer to the same retained controller state. Commands return `false` when no
 /// compatible live WebView accepts them; `true` means accepted, not completed.
 inline WebViewController UseWebViewController(
-    const std::source_location& location = std::source_location::current()
-) {
+    const std::source_location &location = std::source_location::current()) {
   return UseState(WebViewController{}, location);
 }
 
@@ -307,6 +319,6 @@ View WebView(WebViewProperties properties, WebViewController controller);
 /// @endcode
 ///
 /// Installation throws when the current platform has no WebView adapter.
-void InstallWebView(RootContext& root);
+void InstallWebView(RootContext &root);
 
 } // namespace huxerui

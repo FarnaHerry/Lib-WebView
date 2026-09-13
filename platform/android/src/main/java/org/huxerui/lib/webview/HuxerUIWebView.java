@@ -2,6 +2,7 @@ package org.huxerui.lib.webview;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.net.http.SslError;
 import android.os.Build;
 import android.webkit.RenderProcessGoneDetail;
@@ -27,7 +28,10 @@ import java.nio.charset.StandardCharsets;
 
 public final class HuxerUIWebView implements HuxerUIPlatformView {
     private static final Set<String> PROPERTY_FIELDS = new LinkedHashSet<>(
-            Arrays.asList("javaScriptEnabled", "url")
+            Arrays.asList("backgroundColor", "domStorageEnabled", "javaScriptEnabled", "url")
+    );
+    private static final Set<String> COLOR_FIELDS = new LinkedHashSet<>(
+            Arrays.asList("alpha", "blue", "green", "red")
     );
     private static final Set<String> REQUEST_FIELDS = new LinkedHashSet<>(
             Arrays.asList("body", "headers", "method", "url")
@@ -39,18 +43,52 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
     private static final class Properties {
         final String url;
         final boolean javaScriptEnabled;
+        final boolean domStorageEnabled;
+        final int backgroundColor;
 
-        Properties(String url, boolean javaScriptEnabled) {
+        Properties(
+                String url,
+                boolean javaScriptEnabled,
+                boolean domStorageEnabled,
+                int backgroundColor
+        ) {
             this.url = url;
             this.javaScriptEnabled = javaScriptEnabled;
+            this.domStorageEnabled = domStorageEnabled;
+            this.backgroundColor = backgroundColor;
         }
 
         static Properties decode(PlatformPayload payload) {
             payload.rejectUnknownFields(PROPERTY_FIELDS);
             return new Properties(
                     payload.requireField("url").requireString(),
-                    payload.requireField("javaScriptEnabled").requireBoolean()
+                    payload.requireField("javaScriptEnabled").requireBoolean(),
+                    payload.requireField("domStorageEnabled").requireBoolean(),
+                    decodeColor(payload.requireField("backgroundColor"))
             );
+        }
+
+        Properties withUrl(String value) {
+            return new Properties(
+                    value,
+                    javaScriptEnabled,
+                    domStorageEnabled,
+                    backgroundColor
+            );
+        }
+
+        private static int decodeColor(PlatformPayload payload) {
+            payload.rejectUnknownFields(COLOR_FIELDS);
+            return Color.argb(
+                    channel(payload.requireField("alpha").requireDouble()),
+                    channel(payload.requireField("red").requireDouble()),
+                    channel(payload.requireField("green").requireDouble()),
+                    channel(payload.requireField("blue").requireDouble())
+            );
+        }
+
+        private static int channel(double value) {
+            return (int) Math.round(Math.max(0.0, Math.min(1.0, value)) * 255.0);
         }
     }
 
@@ -153,6 +191,8 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
         boolean urlChanged = initial || !properties.url.equals(next.url);
         properties = next;
         webView.getSettings().setJavaScriptEnabled(next.javaScriptEnabled);
+        webView.getSettings().setDomStorageEnabled(next.domStorageEnabled);
+        webView.setBackgroundColor(next.backgroundColor);
         if (urlChanged) {
             String url = next.url;
             webView.post(() -> {
@@ -345,7 +385,7 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
-            properties = new Properties(url == null ? "" : url, properties.javaScriptEnabled);
+            properties = properties.withUrl(url == null ? "" : url);
             loading = true;
             emitStateEvent("loadStarted");
             emitNavigationState();

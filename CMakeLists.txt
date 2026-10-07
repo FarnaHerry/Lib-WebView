@@ -29,12 +29,20 @@ if (WIN32)
     list(APPEND LIBRARY_SOURCE_FILES ${LIBRARY_WINDOWS_SOURCE_FILES})
 endif ()
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    file(GLOB_RECURSE LIBRARY_LINUX_SOURCE_FILES CONFIGURE_DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cc"
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cxx"
-    )
-    list(APPEND LIBRARY_SOURCE_FILES ${LIBRARY_LINUX_SOURCE_FILES})
+    find_package(PkgConfig QUIET)
+    if (PkgConfig_FOUND)
+        pkg_check_modules(HUXERUI_WEBKITGTK QUIET IMPORTED_TARGET webkitgtk-6.0>=2.40)
+    endif ()
+    if (HUXERUI_WEBKITGTK_FOUND)
+        file(GLOB_RECURSE LIBRARY_LINUX_SOURCE_FILES CONFIGURE_DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cc"
+                "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cxx"
+        )
+        list(APPEND LIBRARY_SOURCE_FILES ${LIBRARY_LINUX_SOURCE_FILES})
+    else ()
+        message(STATUS "HuxerUI WebView Linux backend disabled: WebKitGTK 6.0 development files were not found")
+    endif ()
 endif ()
 if (EMSCRIPTEN)
     file(GLOB_RECURSE LIBRARY_WEB_SOURCE_FILES CONFIGURE_DEPENDS
@@ -91,6 +99,10 @@ target_include_directories(webview PRIVATE
 
 if (APPLE)
     target_link_libraries(webview PRIVATE "-framework WebKit")
+endif ()
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND HUXERUI_WEBKITGTK_FOUND)
+    target_compile_definitions(webview PRIVATE HUXERUI_WEBVIEW_LINUX=1)
+    target_link_libraries(webview PRIVATE PkgConfig::HUXERUI_WEBKITGTK)
 endif ()
 if (WIN32)
     set(WEBVIEW2_SDK_ROOT "$ENV{WEBVIEW2_SDK_ROOT}" CACHE PATH "Microsoft.Web.WebView2 NuGet package root")

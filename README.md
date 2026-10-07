@@ -1,5 +1,7 @@
 # HuxerUI WebView
 
+This downstream fork maintains application fixes on `farna/main`, including current application hooks, native Cookie commands and the Linux WebKitGTK 6.0 backend. The official baseline is tracked through `upstream/main` from `HuxerUI/Lib-WebView`. Consumers should pin a validated commit and use matching C++ and Android Java revisions.
+
 HuxerUI WebView is a portable embedded web-content component for HuxerUI applications. It provides a common C++ API
 for navigation, custom requests, HTML content, JavaScript evaluation, page-to-application messaging, and observable
 browser state.

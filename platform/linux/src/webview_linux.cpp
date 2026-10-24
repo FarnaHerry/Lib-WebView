@@ -411,6 +411,10 @@ std::shared_ptr<LinuxWebViewInstance> CreateLinuxWebView(GtkWidget* parent, cons
     throw std::runtime_error("WebKitGTK could not create a WebView widget");
   }
   instance->web_view = WEBKIT_WEB_VIEW(widget);
+  // GTK4 的 widget 默认 visible=FALSE：PlatformView 宿主只 show 顶层容器，
+  // WebView widget 本体必须显式 show，否则不进入映射状态、WebKit 不渲染
+  // 任何帧（快照链输出空白，预览区全透明）。
+  gtk_widget_set_visible(widget, TRUE);
   gtk_widget_set_focusable(widget, TRUE);
   gtk_widget_set_hexpand(widget, TRUE);
   gtk_widget_set_vexpand(widget, TRUE);

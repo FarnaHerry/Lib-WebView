@@ -288,8 +288,13 @@ private:
 /// Retains a WebView controller in the current composition scope.
 ///
 /// One controller may be bound to at most one mounted WebView at a time. Copies
-/// refer to the same retained controller state. Commands return `false` when no
-/// compatible live WebView accepts them; `true` means accepted, not completed.
+/// refer to the same retained controller state. Load commands (`LoadHtml`,
+/// `LoadRequest`, `LoadUrl`) are final-state: a call issued before a WebView
+/// connects is retained and replayed once the view mounts, so composition-time
+/// callers cannot lose the first document. The return value still reports
+/// whether a live WebView accepted the call; `true` means accepted, not
+/// completed. Ephemeral commands (reload, stop, history) return `false` when no
+/// compatible live WebView accepts them.
 inline WebViewController UseWebViewController(
     const std::source_location& location = std::source_location::current()
 ) {

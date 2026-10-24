@@ -464,6 +464,13 @@ void DisposeLinuxWebView(LinuxWebViewInstance& instance) {
 } // namespace
 
 void InstallPlatformWebView(ApplicationContext& root) {
+  // WebKit 的 DMABUF 渲染器在宿主进程自带 GL/EGL 栈（HuxerUI 自绘管线）时，
+  // Web 内容纹理的跨上下文导入可能失败：加载照常完成（load-changed 到
+  // FINISHED），但合成层拿不到内容纹理，widget 只画出默认白底（空白预览）。
+  // 实验性驱动（如 INTEL_FORCE_PROBE 下的 Panther Lake iris）几乎必现。
+  // 默认禁用 DMABUF 渲染器、走共享内存合成（正确性优先）；用户显式设置过
+  // 该变量时（overwrite=0）尊重用户选择。
+  setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
   linux::PlatformViewFactory<WebViewProperties, LinuxWebViewInstance, WebViewController> factory{
       .create = CreateLinuxWebView,
       .view = [](const std::shared_ptr<LinuxWebViewInstance>& instance) -> GtkWidget* {

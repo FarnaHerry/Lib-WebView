@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <wrl.h>
+#include <shellapi.h>
 #include <shlwapi.h>
+#include <shlobj_core.h>
 
 #include <WebView2.h>
 
@@ -115,6 +117,35 @@ void EnsureWindowClass() {
       throw std::runtime_error("Could not register the WebView host window class");
     }
   });
+}
+
+// WebView2 的默认用户数据目录是 exe 旁边的 `<exe 名>.exe.WebView2`：应用装进
+// Program Files（安装器的默认位置，目录属主是管理员）时那里不可写，WebView2
+// 环境创建必然失败，隐藏登录浏览器永远起不来（登录页表现为「网页会话暂不可用，
+// 请稍后再试」，重试无效）。显式给一个每用户可写的目录 —— %LOCALAPPDATA%\<exe
+// 名>\WebView2，与 exe 所在位置无关。
+std::wstring DefaultUserDataFolder() {
+  wchar_t exe_path[MAX_PATH] = {};
+  const DWORD length = GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) {
+    return {};
+  }
+  std::wstring exe(exe_path, length);
+  const std::size_t slash = exe.find_last_of(L"\\/");
+  std::wstring base = slash == std::wstring::npos ? exe : exe.substr(slash + 1);
+  if (base.size() > 4 && base.ends_with(L".exe")) {
+    base.resize(base.size() - 4);
+  }
+  if (base.empty()) {
+    return {};
+  }
+  PWSTR local = nullptr;
+  if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &local))) {
+    return {};
+  }
+  std::wstring folder = std::wstring(local) + L"\\" + base + L"\\WebView2";
+  CoTaskMemFree(local);
+  return folder;
 }
 
 std::string CurrentUrl(const WindowsWebViewInstance& instance) {
@@ -542,9 +573,13 @@ void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
 
 void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) {
   std::weak_ptr<WindowsWebViewInstance> weak_instance = instance;
+  const std::wstring user_data_folder = DefaultUserDataFolder();
+  if (!user_data_folder.empty()) {
+    SHCreateDirectoryExW(nullptr, user_data_folder.c_str(), nullptr);
+  }
   const HRESULT started = CreateCoreWebView2EnvironmentWithOptions(
       nullptr,
-      nullptr,
+      user_data_folder.empty() ? nullptr : user_data_folder.c_str(),
       nullptr,
       Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
           [weak_instance](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {

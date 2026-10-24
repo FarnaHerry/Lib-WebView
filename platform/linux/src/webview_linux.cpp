@@ -51,6 +51,7 @@ template <class Event> void EmitNavigationState(const std::shared_ptr<LinuxWebVi
 
 void EmitLoadError(const std::shared_ptr<LinuxWebViewInstance>& instance, std::string code, std::string message,
                    std::optional<std::string> uri = std::nullopt) {
+  g_warning("[WEBVIEW] load error\n");
   if (!instance || instance->disposed) {
     return;
   }
@@ -93,6 +94,7 @@ void LoadRequest(const std::shared_ptr<LinuxWebViewInstance>& instance, const We
 }
 
 void LoadHtml(const std::shared_ptr<LinuxWebViewInstance>& instance, const WebViewHtml& html) {
+  g_message("[WEBVIEW] LoadHtml len=%zu base=%s", html.content.size(), html.base_url.c_str());
   if (!html.base_url.empty() && !g_uri_is_valid(html.base_url.c_str(), G_URI_FLAGS_NONE, nullptr)) {
     EmitLoadError(instance, "linux/webview/invalid-base-url", "The WebView base URL is invalid", html.base_url);
     return;
@@ -356,6 +358,7 @@ gboolean DecidePolicy(WebKitWebView*, WebKitPolicyDecision* decision, WebKitPoli
 }
 
 void LoadChanged(WebKitWebView*, WebKitLoadEvent event, gpointer data) {
+  g_message("[WEBVIEW] load event=%d", static_cast<int>(event));
   auto* raw = static_cast<LinuxWebViewInstance*>(data);
   if (raw == nullptr || raw->disposed) {
     return;
@@ -441,6 +444,7 @@ std::shared_ptr<LinuxWebViewInstance> CreateLinuxWebView(GtkWidget* parent, cons
   g_signal_connect(instance->web_view, "notify::can-go-back", G_CALLBACK(NavigationPropertyChanged), instance.get());
   g_signal_connect(instance->web_view, "notify::can-go-forward", G_CALLBACK(NavigationPropertyChanged), instance.get());
   ApplyProperties(instance, properties, true);
+  g_message("[WEBVIEW] LinuxWebView created");
   return instance;
 }
 

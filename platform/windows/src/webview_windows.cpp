@@ -66,6 +66,7 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   ComPtr<ICoreWebView2Environment> environment;
   ComPtr<ICoreWebView2Controller> controller;
   ComPtr<ICoreWebView2> web_view;
+  std::optional<std::wstring> default_user_agent;
   EventRegistrationToken navigation_starting_token{};
   EventRegistrationToken navigation_completed_token{};
   EventRegistrationToken history_changed_token{};
@@ -449,6 +450,22 @@ void ApplyProperties(const std::shared_ptr<WindowsWebViewInstance>& instance, co
   if (SUCCEEDED(instance->web_view->get_Settings(&settings))) {
     settings->put_IsScriptEnabled(properties.java_script_enabled);
     settings->put_IsWebMessageEnabled(TRUE);
+    ComPtr<ICoreWebView2Settings2> settings2;
+    if (SUCCEEDED(settings.As(&settings2))) {
+      if (!instance->default_user_agent) {
+        wchar_t* raw_default = nullptr;
+        if (SUCCEEDED(settings2->get_UserAgent(&raw_default)) && raw_default != nullptr) {
+          instance->default_user_agent = raw_default;
+          CoTaskMemFree(raw_default);
+        }
+      }
+      if (!properties.user_agent.empty()) {
+        const std::wstring user_agent = Utf8ToWide(properties.user_agent);
+        if (!user_agent.empty()) settings2->put_UserAgent(user_agent.c_str());
+      } else if (instance->default_user_agent) {
+        settings2->put_UserAgent(instance->default_user_agent->c_str());
+      }
+    }
   }
   if (url_changed) {
     const std::wstring url = Utf8ToWide(properties.url);

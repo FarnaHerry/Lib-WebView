@@ -10,6 +10,13 @@ int main() {
   auto check = [&](bool passed, const char* message) {
     if (!passed) { std::printf("FAIL %s\n", message); ++failures; }
   };
+  const WebViewProperties defaults{};
+  check(defaults.user_agent.empty(), "native user agent is the default");
+  WebViewProperties custom{.url = "https://example.com", .java_script_enabled = true,
+                           .user_agent = "example-agent"};
+  const auto encoded = WebViewProperties::Encode(custom).AsObject();
+  check(encoded.at("userAgent").AsString() == "example-agent", "user agent encoded for platform views");
+  check(!(custom == defaults), "user agent participates in property updates");
   bool completed = false;
   auto completion = [&](PlatformResult<std::string> result) {
     completed = std::holds_alternative<std::string>(result) &&

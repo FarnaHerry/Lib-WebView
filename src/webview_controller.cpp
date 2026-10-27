@@ -1,7 +1,5 @@
 #include <huxerui/webview.h>
 
-#include <glib.h>
-
 #include <algorithm>
 #include <cctype>
 #include <functional>
@@ -30,11 +28,9 @@ void WebViewControllerAccess::Connect(
     WebViewCommandHandler handler
 ) {
   controller.state_->handler = std::move(handler);
-  g_message("[WEBVIEW] controller connected to live view");
   if (controller.state_->pending_load) {
     auto replay = std::move(*controller.state_->pending_load);
     controller.state_->pending_load.reset();
-    g_message("[WEBVIEW] replaying buffered load command");
     std::invoke(controller.state_->handler, std::move(replay));
   }
 }
@@ -61,7 +57,6 @@ void BufferLoad(
     detail::WebViewControllerCommand command
 ) {
   if (state && !state->handler) {
-    g_message("[WEBVIEW] buffering load command (no live view yet)");
     state->pending_load = std::move(command);
   }
 }

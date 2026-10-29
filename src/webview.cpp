@@ -30,6 +30,7 @@ PlatformPayload WebViewHtml::Encode(const WebViewHtml& value) {
 PlatformPayload WebViewProperties::Encode(const WebViewProperties& value) {
   return PlatformPayload::Object{
       {"javaScriptEnabled", value.java_script_enabled},
+      {"userAgent", value.user_agent},
       {"url", value.url},
   };
 }

@@ -28,7 +28,7 @@ import java.nio.charset.StandardCharsets;
 
 public final class HuxerUIWebView implements HuxerUIPlatformView {
     private static final Set<String> PROPERTY_FIELDS = new LinkedHashSet<>(
-            Arrays.asList("javaScriptEnabled", "url")
+            Arrays.asList("javaScriptEnabled", "url", "userAgent")
     );
     private static final Set<String> REQUEST_FIELDS = new LinkedHashSet<>(
             Arrays.asList("body", "headers", "method", "url")
@@ -40,17 +40,20 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
     private static final class Properties {
         final String url;
         final boolean javaScriptEnabled;
+        final String userAgent;
 
-        Properties(String url, boolean javaScriptEnabled) {
+        Properties(String url, boolean javaScriptEnabled, String userAgent) {
             this.url = url;
             this.javaScriptEnabled = javaScriptEnabled;
+            this.userAgent = userAgent;
         }
 
         static Properties decode(PlatformPayload payload) {
             payload.rejectUnknownFields(PROPERTY_FIELDS);
             return new Properties(
                     payload.requireField("url").requireString(),
-                    payload.requireField("javaScriptEnabled").requireBoolean()
+                    payload.requireField("javaScriptEnabled").requireBoolean(),
+                    payload.requireField("userAgent").requireString()
             );
         }
     }
@@ -155,6 +158,7 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
         boolean urlChanged = initial || !properties.url.equals(next.url);
         properties = next;
         webView.getSettings().setJavaScriptEnabled(next.javaScriptEnabled);
+        webView.getSettings().setUserAgentString(next.userAgent.isEmpty() ? null : next.userAgent);
         if (urlChanged) {
             String url = next.url;
             webView.post(() -> {
@@ -360,7 +364,7 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
-            properties = new Properties(url == null ? "" : url, properties.javaScriptEnabled);
+            properties = new Properties(url == null ? "" : url, properties.javaScriptEnabled, properties.userAgent);
             loading = true;
             emitStateEvent("loadStarted");
             emitNavigationState();

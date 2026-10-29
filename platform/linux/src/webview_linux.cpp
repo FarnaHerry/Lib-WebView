@@ -279,6 +279,8 @@ void ApplyProperties(const std::shared_ptr<LinuxWebViewInstance>& instance, cons
   instance->properties = properties;
   webkit_settings_set_enable_javascript(webkit_web_view_get_settings(instance->web_view),
                                         properties.java_script_enabled);
+  webkit_settings_set_user_agent(webkit_web_view_get_settings(instance->web_view),
+      properties.user_agent.empty() ? nullptr : properties.user_agent.c_str());
   if (url_changed) {
     LoadUrl(instance, properties.url);
   }

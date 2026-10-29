@@ -93,6 +93,11 @@ struct WebViewProperties {
   /// Enables page JavaScript. Disabled by default.
   bool java_script_enabled = false;
 
+  /// Overrides the native browser user agent for this view. Empty uses the platform default.
+  /// Web iframe hosts cannot override the browser user agent. Changing this value
+  /// affects subsequent navigations; reload explicitly to apply it to the current page.
+  std::string user_agent;
+
   bool operator==(const WebViewProperties&) const = default;
 
   /// Encodes the value for a cross-language PlatformView adapter.

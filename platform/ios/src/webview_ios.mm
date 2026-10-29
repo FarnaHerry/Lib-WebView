@@ -250,6 +250,7 @@ void ApplyProperties(
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
   instance->view.configuration.preferences.javaScriptEnabled = properties.java_script_enabled;
 #pragma clang diagnostic pop
+  instance->view.customUserAgent = properties.user_agent.empty() ? nil : ToNSString(properties.user_agent);
 
   if (url_changed) {
     LoadUrl(instance, properties.url);

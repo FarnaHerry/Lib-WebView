@@ -8,6 +8,11 @@ browser state.
 
 The library uses the platform web engine and integrates it as a HuxerUI `PlatformView`.
 
+`WebViewProperties::user_agent` optionally overrides the user agent of one native view.
+The empty default uses the platform's normal user agent. Set it before navigation;
+changing it later affects subsequent navigations, so reload to apply it to a page
+already loaded. Browser-hosted Web iframes cannot change their user agent.
+
 ## Preview
 
 <table>

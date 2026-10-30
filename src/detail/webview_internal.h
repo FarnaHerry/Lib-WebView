@@ -35,12 +35,34 @@ struct WebViewCookieCommand {
   WebViewJavaScriptCompletion completion;
 };
 
+struct WebViewSetCookieCommand {
+  std::string url;
+  WebViewCookie cookie;
+  WebViewJavaScriptCompletion completion;
+};
+
+struct WebViewDeleteCookieCommand {
+  std::string url;
+  std::string name;
+  std::string domain;
+  std::string path;
+  WebViewJavaScriptCompletion completion;
+};
+
+struct WebViewGetCookieListCommand {
+  std::string url;
+  WebViewCookieListCompletion completion;
+};
+
 using WebViewControllerCommand = std::variant<
     WebViewCommand,
     WebViewLoadRequestCommand,
     WebViewLoadHtmlCommand,
     WebViewEvaluateJavaScriptCommand,
-    WebViewCookieCommand
+    WebViewCookieCommand,
+    WebViewSetCookieCommand,
+    WebViewDeleteCookieCommand,
+    WebViewGetCookieListCommand
 >;
 
 using WebViewCommandHandler = std::function<bool(WebViewControllerCommand)>;

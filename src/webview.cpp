@@ -7,6 +7,31 @@
 
 namespace huxerui {
 
+namespace {
+
+std::string_view CookieSameSiteName(WebViewCookieSameSite same_site) {
+  switch (same_site) {
+    case WebViewCookieSameSite::Unspecified:
+      return "unspecified";
+    case WebViewCookieSameSite::Lax:
+      return "lax";
+    case WebViewCookieSameSite::Strict:
+      return "strict";
+    case WebViewCookieSameSite::None:
+      return "none";
+  }
+  return "unspecified";
+}
+
+WebViewCookieSameSite CookieSameSiteFromName(std::string_view same_site) {
+  if (same_site == "lax") return WebViewCookieSameSite::Lax;
+  if (same_site == "strict") return WebViewCookieSameSite::Strict;
+  if (same_site == "none") return WebViewCookieSameSite::None;
+  return WebViewCookieSameSite::Unspecified;
+}
+
+} // namespace
+
 PlatformPayload WebViewRequest::Encode(const WebViewRequest& value) {
   PlatformPayload::Object headers;
   for (const auto& [name, content] : value.headers) {
@@ -18,6 +43,40 @@ PlatformPayload WebViewRequest::Encode(const WebViewRequest& value) {
       {"method", value.method},
       {"url", value.url},
   };
+}
+
+PlatformPayload WebViewCookie::Encode(const WebViewCookie& value) {
+  return PlatformPayload::Object{
+      {"domain", value.domain},
+      {"expires", value.expires.has_value()
+          ? PlatformPayload(std::chrono::duration<double>(value.expires->time_since_epoch()).count())
+          : PlatformPayload{}},
+      {"httpOnly", value.http_only},
+      {"name", value.name},
+      {"path", value.path},
+      {"sameSite", std::string(CookieSameSiteName(value.same_site))},
+      {"secure", value.secure},
+      {"value", value.value},
+  };
+}
+
+WebViewCookie WebViewCookie::Decode(const PlatformPayload& payload) {
+  const PlatformPayload::Object& fields = payload.AsObject();
+  const PlatformPayload& expires = fields.at("expires");
+  WebViewCookie cookie{
+      .name = std::string(fields.at("name").AsString()),
+      .value = std::string(fields.at("value").AsString()),
+      .domain = std::string(fields.at("domain").AsString()),
+      .path = std::string(fields.at("path").AsString()),
+      .secure = fields.at("secure").AsBoolean(),
+      .http_only = fields.at("httpOnly").AsBoolean(),
+      .same_site = CookieSameSiteFromName(fields.at("sameSite").AsString()),
+  };
+  if (!expires.IsNull()) {
+    cookie.expires = std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(
+        std::chrono::duration<double>(expires.AsDouble())));
+  }
+  return cookie;
 }
 
 PlatformPayload WebViewHtml::Encode(const WebViewHtml& value) {

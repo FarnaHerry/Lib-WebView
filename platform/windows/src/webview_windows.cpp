@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <huxerui/webview.h>
 #include <huxerui/windows/platform_registry.h>
@@ -72,6 +73,9 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   EventRegistrationToken history_changed_token{};
   EventRegistrationToken title_changed_token{};
   EventRegistrationToken web_message_received_token{};
+  // Commands can arrive between the platform view connecting and WebView2 finishing
+  // initialization; they are queued instead of being dropped, then drained in order.
+  std::vector<WebViewControllerCommand> pending_commands;
   bool events_attached = false;
   bool loading = false;
   bool disposed = false;
@@ -491,7 +495,8 @@ bool DeleteCookie(const std::shared_ptr<WindowsWebViewInstance>& instance, WebVi
     command.completion(PlatformError{"webview/invalid-cookie", "Cookie identity is not valid UTF-8", {}});
     return true;
   }
-  const HRESULT status = manager->DeleteCookie(name.c_str(), domain.c_str(), path.c_str());
+  const HRESULT status =
+      manager->DeleteCookiesWithDomainAndPath(name.c_str(), domain.c_str(), path.c_str());
   if (FAILED(status)) command.completion(PlatformError{"webview/cookies", "Could not delete cookie", {}});
   else command.completion(std::string{});
   return true;
@@ -744,6 +749,8 @@ void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
   instance->events_attached = true;
 }
 
+void DrainPendingCommands(const std::weak_ptr<WindowsWebViewInstance>& instance);
+
 void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) {
   std::weak_ptr<WindowsWebViewInstance> weak_instance = instance;
   const std::wstring user_data_folder = DefaultUserDataFolder();
@@ -761,6 +768,7 @@ void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) 
               return S_OK;
             }
             if (FAILED(result) || environment == nullptr) {
+              current->pending_commands.clear();
               EmitLoadError(
                   current,
                   "windows/webview2/environment",
@@ -781,6 +789,7 @@ void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) 
                         return S_OK;
                       }
                       if (FAILED(controller_result) || controller == nullptr) {
+                        value->pending_commands.clear();
                         EmitLoadError(
                             value,
                             "windows/webview2/controller",
@@ -791,6 +800,7 @@ void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) 
                       value->controller = controller;
                       controller->get_CoreWebView2(&value->web_view);
                       if (!value->web_view) {
+                        value->pending_commands.clear();
                         EmitLoadError(
                             value,
                             "windows/webview2/view",
@@ -803,6 +813,7 @@ void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) 
                       const WebViewProperties properties = value->properties;
                       value->properties.url.clear();
                       ApplyProperties(value, properties);
+                      DrainPendingCommands(weak_instance);
                       return S_OK;
                     })
                     .Get()
@@ -850,8 +861,14 @@ bool RunCommand(
     WebViewControllerCommand command
 ) {
   std::shared_ptr<WindowsWebViewInstance> instance = weak_instance.lock();
-  if (!instance || instance->disposed || !instance->web_view) {
+  if (!instance || instance->disposed) {
     return false;
+  }
+  // The controller connects as soon as the platform view is created, while the WebView2
+  // environment/controller are still being created asynchronously. Queue instead of dropping.
+  if (!instance->web_view) {
+    instance->pending_commands.push_back(std::move(command));
+    return true;
   }
   if (const auto* value = std::get_if<WebViewCommand>(&command)) {
     switch (*value) {
@@ -895,8 +912,21 @@ bool RunCommand(
   );
 }
 
+void DrainPendingCommands(const std::weak_ptr<WindowsWebViewInstance>& weak_instance) {
+  std::shared_ptr<WindowsWebViewInstance> instance = weak_instance.lock();
+  if (!instance || instance->disposed || !instance->web_view) {
+    return;
+  }
+  std::vector<WebViewControllerCommand> pending = std::move(instance->pending_commands);
+  instance->pending_commands.clear();
+  for (auto& command : pending) {
+    RunCommand(weak_instance, std::move(command));
+  }
+}
+
 void DisposeWindowsWebView(WindowsWebViewInstance& instance) {
   instance.disposed = true;
+  instance.pending_commands.clear();
   if (instance.events_attached && instance.web_view) {
     instance.web_view->remove_NavigationStarting(instance.navigation_starting_token);
     instance.web_view->remove_NavigationCompleted(instance.navigation_completed_token);

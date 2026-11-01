@@ -56,6 +56,27 @@ bool RunCommand(PlatformChannel channel, WebViewControllerCommand command) {
         value->url, std::move(value->completion));
     return true;
   }
+  if (auto* value = std::get_if<WebViewSetCookieCommand>(&command)) {
+    channel.Invoke<std::string>("setCookie", PlatformPayload(PlatformPayload::Object{
+        {"cookie", WebViewCookie::Encode(value->cookie)},
+        {"url", value->url},
+    }), std::move(value->completion));
+    return true;
+  }
+  if (auto* value = std::get_if<WebViewDeleteCookieCommand>(&command)) {
+    channel.Invoke<std::string>("deleteCookie", PlatformPayload(PlatformPayload::Object{
+        {"domain", value->domain},
+        {"name", value->name},
+        {"path", value->path},
+        {"url", value->url},
+    }), std::move(value->completion));
+    return true;
+  }
+  if (auto* value = std::get_if<WebViewGetCookieListCommand>(&command)) {
+    value->completion(PlatformError{"webview/unsupported-cookie-details",
+        "Android CookieManager cannot read cookie attributes", {}});
+    return true;
+  }
   auto value = std::get<WebViewEvaluateJavaScriptCommand>(std::move(command));
   channel.Invoke<std::string>(
       "evaluateJavaScript",

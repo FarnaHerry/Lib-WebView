@@ -273,6 +273,234 @@ void RunCookieCommand(const std::shared_ptr<LinuxWebViewInstance>& instance, Web
   webkit_cookie_manager_get_cookies(manager, command.url.c_str(), nullptr, CookiesReady, operation);
 }
 
+struct CookieListOperation {
+  explicit CookieListOperation(WebKitCookieManager* manager_value, WebViewCookieListCompletion completion_value)
+      : manager(WEBKIT_COOKIE_MANAGER(g_object_ref(manager_value))), completion(std::move(completion_value)) {}
+  ~CookieListOperation() { g_object_unref(manager); }
+
+  WebKitCookieManager* manager;
+  WebViewCookieListCompletion completion;
+};
+
+WebViewCookie CookieFromSoup(SoupCookie* cookie) {
+  WebViewCookie result{
+      .name = soup_cookie_get_name(cookie),
+      .value = soup_cookie_get_value(cookie),
+      .domain = soup_cookie_get_domain(cookie),
+      .path = soup_cookie_get_path(cookie),
+      .secure = soup_cookie_get_secure(cookie) != FALSE,
+      .http_only = soup_cookie_get_http_only(cookie) != FALSE,
+  };
+  GDateTime* expires = soup_cookie_get_expires(cookie);
+  if (expires != nullptr) {
+    result.expires = std::chrono::system_clock::time_point(std::chrono::seconds(g_date_time_to_unix(expires)));
+  }
+  switch (soup_cookie_get_same_site_policy(cookie)) {
+    case SOUP_SAME_SITE_POLICY_NONE:
+      result.same_site = WebViewCookieSameSite::None;
+      break;
+    case SOUP_SAME_SITE_POLICY_LAX:
+      result.same_site = WebViewCookieSameSite::Lax;
+      break;
+    case SOUP_SAME_SITE_POLICY_STRICT:
+      result.same_site = WebViewCookieSameSite::Strict;
+      break;
+  }
+  return result;
+}
+
+void CookieListReady(GObject* source, GAsyncResult* result, gpointer data) {
+  std::unique_ptr<CookieListOperation> operation(static_cast<CookieListOperation*>(data));
+  GError* error = nullptr;
+  GList* cookies = webkit_cookie_manager_get_cookies_finish(WEBKIT_COOKIE_MANAGER(source), result, &error);
+  if (error != nullptr) {
+    operation->completion(PlatformError{"webview/cookies", error->message != nullptr ? error->message : "Cookie query failed", {}});
+    g_error_free(error);
+    return;
+  }
+  std::vector<WebViewCookie> values;
+  for (GList* item = cookies; item != nullptr; item = item->next) {
+    values.push_back(CookieFromSoup(static_cast<SoupCookie*>(item->data)));
+  }
+  g_list_free_full(cookies, reinterpret_cast<GDestroyNotify>(soup_cookie_free));
+  operation->completion(std::move(values));
+}
+
+void CookieAdded(GObject* source, GAsyncResult* result, gpointer data) {
+  std::unique_ptr<CookieOperation> operation(static_cast<CookieOperation*>(data));
+  GError* error = nullptr;
+  const gboolean added = webkit_cookie_manager_add_cookie_finish(WEBKIT_COOKIE_MANAGER(source), result, &error);
+  if (error != nullptr || added == FALSE) {
+    operation->completion(PlatformError{"webview/cookies",
+        error != nullptr && error->message != nullptr ? error->message : "Could not set WebKitGTK cookie", {}});
+    if (error != nullptr) g_error_free(error);
+    return;
+  }
+  operation->completion(std::string{});
+}
+
+void RunSetCookieCommand(const std::shared_ptr<LinuxWebViewInstance>& instance, WebViewSetCookieCommand command) {
+  if (!instance || instance->disposed || instance->web_view == nullptr) {
+    command.completion(PlatformError{"webview/disconnected", "The WebView is disconnected", {}});
+    return;
+  }
+  if (!ValidCookieUri(command.url)) {
+    command.completion(PlatformError{"webview/invalid-url", "Cookie URL must be an absolute HTTP or HTTPS URL", {}});
+    return;
+  }
+  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
+  WebKitCookieManager* manager = session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
+  if (manager == nullptr) {
+    command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
+    return;
+  }
+  SoupCookie* cookie = soup_cookie_new(command.cookie.name.c_str(), command.cookie.value.c_str(),
+                                       command.cookie.domain.c_str(), command.cookie.path.c_str(), -1);
+  if (cookie == nullptr) {
+    command.completion(PlatformError{"webview/invalid-cookie", "Could not create WebKitGTK cookie", {}});
+    return;
+  }
+  if (command.cookie.expires.has_value()) {
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+        command.cookie.expires->time_since_epoch()).count();
+    GDateTime* expires = g_date_time_new_from_unix_utc(static_cast<gint64>(seconds));
+    if (expires == nullptr) {
+      soup_cookie_free(cookie);
+      command.completion(PlatformError{"webview/invalid-cookie", "Cookie expiration is outside the supported range", {}});
+      return;
+    }
+    soup_cookie_set_expires(cookie, expires);
+    g_date_time_unref(expires);
+  }
+  soup_cookie_set_secure(cookie, command.cookie.secure ? TRUE : FALSE);
+  soup_cookie_set_http_only(cookie, command.cookie.http_only ? TRUE : FALSE);
+  switch (command.cookie.same_site) {
+    case WebViewCookieSameSite::Unspecified:
+      break;
+    case WebViewCookieSameSite::Lax:
+      soup_cookie_set_same_site_policy(cookie, SOUP_SAME_SITE_POLICY_LAX);
+      break;
+    case WebViewCookieSameSite::Strict:
+      soup_cookie_set_same_site_policy(cookie, SOUP_SAME_SITE_POLICY_STRICT);
+      break;
+    case WebViewCookieSameSite::None:
+      soup_cookie_set_same_site_policy(cookie, SOUP_SAME_SITE_POLICY_NONE);
+      break;
+  }
+  auto* operation = new CookieOperation(manager, std::move(command.completion));
+  webkit_cookie_manager_add_cookie(manager, cookie, nullptr, CookieAdded, operation);
+  soup_cookie_free(cookie);
+}
+
+bool CookieDomainsEqual(const char* left, const char* right) {
+  if (left == nullptr || right == nullptr) return false;
+  if (*left == '.') ++left;
+  if (*right == '.') ++right;
+  return g_ascii_strcasecmp(left, right) == 0;
+}
+
+struct CookieDeleteExactBatch {
+  CookieDeleteExactBatch(WebKitCookieManager* manager_value, WebViewJavaScriptCompletion completion_value,
+                         std::string name_value, std::string domain_value, std::string path_value)
+      : manager(WEBKIT_COOKIE_MANAGER(g_object_ref(manager_value))), completion(std::move(completion_value)),
+        name(std::move(name_value)), domain(std::move(domain_value)), path(std::move(path_value)) {}
+  ~CookieDeleteExactBatch() { g_object_unref(manager); }
+
+  WebKitCookieManager* manager;
+  WebViewJavaScriptCompletion completion;
+  std::string name;
+  std::string domain;
+  std::string path;
+  std::size_t pending = 0;
+  bool failed = false;
+};
+
+struct CookieDeleteExactItem {
+  std::shared_ptr<CookieDeleteExactBatch> batch;
+  SoupCookie* cookie = nullptr;
+};
+
+void CookieExactDeleted(GObject* source, GAsyncResult* result, gpointer data) {
+  std::unique_ptr<CookieDeleteExactItem> item(static_cast<CookieDeleteExactItem*>(data));
+  GError* error = nullptr;
+  const gboolean deleted = webkit_cookie_manager_delete_cookie_finish(WEBKIT_COOKIE_MANAGER(source), result, &error);
+  item->batch->failed = item->batch->failed || deleted == FALSE || error != nullptr;
+  if (error != nullptr) g_error_free(error);
+  soup_cookie_free(item->cookie);
+  if (--item->batch->pending == 0) {
+    if (item->batch->failed) {
+      item->batch->completion(PlatformError{"webview/cookies", "Could not delete every matching WebKitGTK cookie", {}});
+    } else {
+      item->batch->completion(std::string{});
+    }
+  }
+}
+
+void CookiesListedForExactDelete(GObject* source, GAsyncResult* result, gpointer data) {
+  std::unique_ptr<std::shared_ptr<CookieDeleteExactBatch>> holder(
+      static_cast<std::shared_ptr<CookieDeleteExactBatch>*>(data));
+  const std::shared_ptr<CookieDeleteExactBatch> batch = *holder;
+  GError* error = nullptr;
+  GList* cookies = webkit_cookie_manager_get_all_cookies_finish(WEBKIT_COOKIE_MANAGER(source), result, &error);
+  if (error != nullptr) {
+    batch->completion(PlatformError{"webview/cookies", error->message != nullptr ? error->message : "Cookie query failed", {}});
+    g_error_free(error);
+    return;
+  }
+  for (GList* item = cookies; item != nullptr; item = item->next) {
+    SoupCookie* cookie = static_cast<SoupCookie*>(item->data);
+    if (batch->name != soup_cookie_get_name(cookie) || batch->path != soup_cookie_get_path(cookie) ||
+        !CookieDomainsEqual(batch->domain.c_str(), soup_cookie_get_domain(cookie))) continue;
+    ++batch->pending;
+    auto* deletion = new CookieDeleteExactItem{batch, soup_cookie_copy(cookie)};
+    webkit_cookie_manager_delete_cookie(batch->manager, deletion->cookie, nullptr, CookieExactDeleted, deletion);
+  }
+  g_list_free_full(cookies, reinterpret_cast<GDestroyNotify>(soup_cookie_free));
+  if (batch->pending == 0) batch->completion(std::string{});
+}
+
+void RunDeleteCookieCommand(const std::shared_ptr<LinuxWebViewInstance>& instance,
+                            WebViewDeleteCookieCommand command) {
+  if (!instance || instance->disposed || instance->web_view == nullptr) {
+    command.completion(PlatformError{"webview/disconnected", "The WebView is disconnected", {}});
+    return;
+  }
+  if (!ValidCookieUri(command.url)) {
+    command.completion(PlatformError{"webview/invalid-url", "Cookie URL must be an absolute HTTP or HTTPS URL", {}});
+    return;
+  }
+  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
+  WebKitCookieManager* manager = session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
+  if (manager == nullptr) {
+    command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
+    return;
+  }
+  auto batch = std::make_shared<CookieDeleteExactBatch>(manager, std::move(command.completion), std::move(command.name),
+                                                        std::move(command.domain), std::move(command.path));
+  webkit_cookie_manager_get_all_cookies(manager, nullptr, CookiesListedForExactDelete,
+                                         new std::shared_ptr<CookieDeleteExactBatch>(std::move(batch)));
+}
+
+void RunGetCookieListCommand(const std::shared_ptr<LinuxWebViewInstance>& instance,
+                             WebViewGetCookieListCommand command) {
+  if (!instance || instance->disposed || instance->web_view == nullptr) {
+    command.completion(PlatformError{"webview/disconnected", "The WebView is disconnected", {}});
+    return;
+  }
+  if (!ValidCookieUri(command.url)) {
+    command.completion(PlatformError{"webview/invalid-url", "Cookie URL must be an absolute HTTP or HTTPS URL", {}});
+    return;
+  }
+  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
+  WebKitCookieManager* manager = session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
+  if (manager == nullptr) {
+    command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
+    return;
+  }
+  auto* operation = new CookieListOperation(manager, std::move(command.completion));
+  webkit_cookie_manager_get_cookies(manager, command.url.c_str(), nullptr, CookieListReady, operation);
+}
+
 void ApplyProperties(const std::shared_ptr<LinuxWebViewInstance>& instance, const WebViewProperties& properties,
                      bool initial) {
   const bool url_changed = initial || instance->properties.url != properties.url;
@@ -319,6 +547,18 @@ bool RunCommand(const std::weak_ptr<LinuxWebViewInstance>& weak_instance, WebVie
   }
   if (auto* value = std::get_if<WebViewCookieCommand>(&command)) {
     RunCookieCommand(instance, std::move(*value));
+    return true;
+  }
+  if (auto* value = std::get_if<WebViewSetCookieCommand>(&command)) {
+    RunSetCookieCommand(instance, std::move(*value));
+    return true;
+  }
+  if (auto* value = std::get_if<WebViewDeleteCookieCommand>(&command)) {
+    RunDeleteCookieCommand(instance, std::move(*value));
+    return true;
+  }
+  if (auto* value = std::get_if<WebViewGetCookieListCommand>(&command)) {
+    RunGetCookieListCommand(instance, std::move(*value));
     return true;
   }
   EvaluateJavaScript(instance, std::get<WebViewEvaluateJavaScriptCommand>(std::move(command)));

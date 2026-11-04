@@ -10,6 +10,23 @@ int main() {
   auto check = [&](bool passed, const char* message) {
     if (!passed) { std::printf("FAIL %s\n", message); ++failures; }
   };
+  {
+    WebViewController buffered;
+    int loads = 0;
+    std::string last_url;
+    check(!buffered.LoadUrl("https://example.com/one"), "disconnected load reports not accepted");
+    check(!buffered.LoadUrl("https://example.com/two"), "second disconnected load reports not accepted");
+    detail::WebViewControllerAccess::Connect(buffered, [&](detail::WebViewControllerCommand command) {
+      if (auto* load = std::get_if<detail::WebViewLoadRequestCommand>(&command)) {
+        ++loads;
+        last_url = load->request.url;
+        return true;
+      }
+      return false;
+    });
+    check(loads == 1 && last_url == "https://example.com/two", "last buffered load replays on connect");
+    check(buffered.IsConnected(), "buffered controller is connected");
+  }
   const WebViewCookie cookie{
       .name = "session",
       .value = "secret",

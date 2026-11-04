@@ -2,9 +2,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
-#include <functional>
-#include <optional>
 #include <utility>
 
 #include "detail/webview_internal.h"
@@ -14,36 +11,13 @@ namespace huxerui::detail {
 class WebViewControllerState {
 public:
   WebViewCommandHandler handler;
-
-  // Load commands issued before a WebView connects are retained here and
-  // replayed on connect: loading is final-state semantics (the last load
-  // wins and replays idempotently), so buffering bridges the gap between
-  // composition-time callers and the platform view that mounts one frame
-  // later. Ephemeral commands (reload/stop/history) and callback-bearing
-  // commands (JavaScript, cookies) are not buffered.
-  std::optional<WebViewControllerCommand> pending_load;
 };
-
-namespace {
-
-void LogWebView(const char* message) {
-  std::fprintf(stderr, "%s\n", message);
-}
-
-} // namespace
 
 void WebViewControllerAccess::Connect(
     const WebViewController& controller,
     WebViewCommandHandler handler
 ) {
   controller.state_->handler = std::move(handler);
-  LogWebView("[WEBVIEW] controller connected to live view");
-  if (controller.state_->pending_load) {
-    auto replay = std::move(*controller.state_->pending_load);
-    controller.state_->pending_load.reset();
-    LogWebView("[WEBVIEW] replaying buffered load command");
-    std::invoke(controller.state_->handler, std::move(replay));
-  }
 }
 
 void WebViewControllerAccess::Disconnect(const WebViewController& controller) {
@@ -62,16 +36,6 @@ bool WebViewController::IsConnected() const noexcept {
 }
 
 namespace {
-
-void BufferLoad(
-    const std::shared_ptr<detail::WebViewControllerState>& state,
-    detail::WebViewControllerCommand command
-) {
-  if (state && !state->handler) {
-    detail::LogWebView("[WEBVIEW] buffering load command (no live view yet)");
-    state->pending_load = std::move(command);
-  }
-}
 
 std::string UppercaseAscii(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -117,21 +81,11 @@ bool WebViewController::LoadUrl(std::string url) const {
 
 bool WebViewController::LoadRequest(WebViewRequest request) const {
   request.method = UppercaseAscii(std::move(request.method));
-  detail::WebViewLoadRequestCommand command{std::move(request)};
-  if (!RunCommand(state_, command)) {
-    BufferLoad(state_, detail::WebViewControllerCommand{std::move(command)});
-    return false;
-  }
-  return true;
+  return RunCommand(state_, detail::WebViewLoadRequestCommand{std::move(request)});
 }
 
 bool WebViewController::LoadHtml(WebViewHtml html) const {
-  detail::WebViewLoadHtmlCommand command{std::move(html)};
-  if (!RunCommand(state_, command)) {
-    BufferLoad(state_, detail::WebViewControllerCommand{std::move(command)});
-    return false;
-  }
-  return true;
+  return RunCommand(state_, detail::WebViewLoadHtmlCommand{std::move(html)});
 }
 
 bool WebViewController::EvaluateJavaScript(
@@ -152,7 +106,7 @@ bool WebViewController::EvaluateJavaScript(
 
 bool WebViewController::GetCookies(std::string url, WebViewJavaScriptCompletion completion) const {
   if (!completion || url.empty()) return false;
-  return RunCommand(state_, detail::WebViewCookieCommand{
+  return RunCommand(state_, detail::WebViewGetCookiesCommand{
       .url = std::move(url), .completion = std::move(completion)});
 }
 
@@ -198,8 +152,8 @@ bool WebViewController::GetCookieList(std::string url, WebViewCookieListCompleti
 
 bool WebViewController::ClearCookies(WebViewJavaScriptCompletion completion) const {
   if (!completion) return false;
-  return RunCommand(state_, detail::WebViewCookieCommand{
-      .clear = true, .completion = std::move(completion)});
+  return RunCommand(state_, detail::WebViewClearCookiesCommand{
+      .completion = std::move(completion)});
 }
 
 } // namespace huxerui

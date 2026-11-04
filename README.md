@@ -1,17 +1,10 @@
 # HuxerUI WebView
 
-This downstream fork maintains application fixes on `farna/main`, including current application hooks, native Cookie commands and the Linux WebKitGTK 6.0 backend. The official baseline is tracked through `upstream/main` from `HuxerUI/Lib-WebView`. Consumers should pin a validated commit and use matching C++ and Android Java revisions.
-
 HuxerUI WebView is a portable embedded web-content component for HuxerUI applications. It provides a common C++ API
 for navigation, custom requests, HTML content, JavaScript evaluation, page-to-application messaging, and observable
 browser state.
 
 The library uses the platform web engine and integrates it as a HuxerUI `PlatformView`.
-
-`WebViewProperties::user_agent` optionally overrides the user agent of one native view.
-The empty default uses the platform's normal user agent. Set it before navigation;
-changing it later affects subsequent navigations, so reload to apply it to a page
-already loaded. Browser-hosted Web iframes cannot change their user agent.
 
 ## Preview
 
@@ -296,6 +289,37 @@ Receive it with:
 The message bridge does not make page content trusted. Validate message formats and enforce application authorization
 before performing privileged actions.
 
+## Linux backend
+
+Linux first looks for WebKitGTK 6.0 (version 2.40 or later) through pkg-config.
+If it is not installed, the build automatically downloads WebKitGTK 2.54.2 from
+the official release archive, verifies its SHA-256, and builds and installs it
+under the build directory without administrator access. Installing the
+distribution's WebKitGTK development package avoids building the browser engine
+from source.
+
+The source fallback requires Ninja and the WebKitGTK build dependencies,
+including the system GTK 4 and libsoup 3 development packages. See the
+[upstream build instructions](https://docs.webkit.org/Build%20%26%20Debug/BuildOptions.html).
+Keep the generated installation with its libraries, helper processes, and
+resources available when running applications that use the downloaded engine.
+
+The backend supports URL and HTML loading, GET requests with custom headers,
+JavaScript evaluation, navigation events, and the `window.huxerui.postMessage`
+bridge. WebKitGTK does not expose setters for a navigation request's method or
+body, so non-GET requests and request bodies emit a load error.
+
+The widget is shown explicitly, and DMABUF rendering is disabled by default for
+compatibility with the host renderer. An explicitly set
+`WEBKIT_DISABLE_DMABUF_RENDERER` value takes precedence.
+
+Use `WebViewProperties::url` for an initial URL, or issue controller commands
+after the platform view connects. Commands issued while disconnected return
+`false` and are not retained.
+
+The backend implements platform cookie read, write, delete, list, and clear
+operations using WebKitCookieManager.
+
 ## Preview application
 
 The preview under [`examples/preview`](examples/preview) provides a browser-style interface and demonstrates navigation,
@@ -316,20 +340,16 @@ Replace `macos` with another supported platform configured on the host.
 The complete public contract and user-facing API comments are available in
 [`include/huxerui/webview.h`](include/huxerui/webview.h).
 
-## License
-
-HuxerUI WebView is available under the [MIT License](LICENSE).
-
-### Native cookie access
+### Platform cookie access
 
 `controller.GetCookies(url, completion)` reads the engine's cookie store for a
 specific URL, including HttpOnly cookies, and returns a `Cookie` request-header
 value. Treat this value as a credential: do not log it or expose it to page
 JavaScript. Supported by Android CookieManager, WKHTTPCookieStore on iOS/macOS,
-and WebView2 CookieManager on Windows. Web completes with
+WebView2 CookieManager on Windows, and WebKitCookieManager on Linux. Web completes with
 `webview/unsupported-cookies`; iframe script access cannot expose HttpOnly cookies.
 
-`controller.SetCookie(url, cookie, completion)` creates or updates a native cookie.
+`controller.SetCookie(url, cookie, completion)` creates or updates a platform cookie.
 `WebViewCookie` supports Domain, Path, Expires, Secure, HttpOnly, and SameSite
 attributes. An absent expiration creates a session cookie; `SameSite::None`
 requires `Secure`. Successful writes complete with an empty string.
@@ -349,14 +369,14 @@ All three new operations complete with `webview/unsupported-cookies` on Web.
 store**, potentially affecting other WebViews using the same profile. It completes
 with an empty string. It does not delete localStorage or the HTTP cache.
 
-Both commands require a mounted controller. As with other controller commands,
+All cookie commands require a mounted controller. As with other controller commands,
 `false` means the command was not accepted; `true` is not a success result.
 Applications must verify the imported session with their own server before
 committing login. Navigating to a callback URL is only a trigger, never proof of
 successful authentication.
 
-Android enables DOM storage for modern site login flows, and publishes navigation
-state for SPA history changes. Register the library in `application_hooks` with
-`InstallWebView(ApplicationContext&)` on current HuxerUI.
-
 Controller contract tests can be enabled with `-DWEBVIEW_BUILD_TESTS=ON`.
+
+## License
+
+HuxerUI WebView is available under the [MIT License](LICENSE).

@@ -28,7 +28,7 @@ import java.nio.charset.StandardCharsets;
 
 public final class HuxerUIWebView implements HuxerUIPlatformView {
     private static final Set<String> PROPERTY_FIELDS = new LinkedHashSet<>(
-            Arrays.asList("javaScriptEnabled", "url", "userAgent")
+            Arrays.asList("javaScriptEnabled", "url")
     );
     private static final Set<String> REQUEST_FIELDS = new LinkedHashSet<>(
             Arrays.asList("body", "headers", "method", "url")
@@ -126,20 +126,17 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
     private static final class Properties {
         final String url;
         final boolean javaScriptEnabled;
-        final String userAgent;
 
-        Properties(String url, boolean javaScriptEnabled, String userAgent) {
+        Properties(String url, boolean javaScriptEnabled) {
             this.url = url;
             this.javaScriptEnabled = javaScriptEnabled;
-            this.userAgent = userAgent;
         }
 
         static Properties decode(PlatformPayload payload) {
             payload.rejectUnknownFields(PROPERTY_FIELDS);
             return new Properties(
                     payload.requireField("url").requireString(),
-                    payload.requireField("javaScriptEnabled").requireBoolean(),
-                    payload.requireField("userAgent").requireString()
+                    payload.requireField("javaScriptEnabled").requireBoolean()
             );
         }
     }
@@ -225,7 +222,6 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
 
     private void configureWebView() {
         WebSettings settings = webView.getSettings();
-        settings.setDomStorageEnabled(true);
         settings.setAllowContentAccess(false);
         settings.setAllowFileAccess(false);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
@@ -244,7 +240,6 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
         boolean urlChanged = initial || !properties.url.equals(next.url);
         properties = next;
         webView.getSettings().setJavaScriptEnabled(next.javaScriptEnabled);
-        webView.getSettings().setUserAgentString(next.userAgent.isEmpty() ? null : next.userAgent);
         if (urlChanged) {
             String url = next.url;
             webView.post(() -> {
@@ -488,14 +483,9 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
-            properties = new Properties(url == null ? "" : url, properties.javaScriptEnabled, properties.userAgent);
+            properties = new Properties(url == null ? "" : url, properties.javaScriptEnabled);
             loading = true;
             emitStateEvent("loadStarted");
-            emitNavigationState();
-        }
-
-        @Override
-        public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
             emitNavigationState();
         }
 

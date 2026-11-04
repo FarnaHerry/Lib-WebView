@@ -36,7 +36,7 @@
 ///     .With(Frame{.min_height = 320.0F});
 /// @endcode
 ///
-/// A WebView is a PlatformView leaf and therefore needs bounded layout. Native
+/// A WebView is a PlatformView leaf and therefore needs bounded layout. Platform
 /// focus, input, accessibility, clipping, and composition follow the active
 /// platform's PlatformView capabilities.
 
@@ -74,7 +74,7 @@ enum class WebViewCookieSameSite {
   None,
 };
 
-/// Describes one native HTTP cookie.
+/// Describes one platform HTTP cookie.
 struct WebViewCookie {
   std::string name;
   std::string value;
@@ -125,11 +125,6 @@ struct WebViewProperties {
 
   /// Enables page JavaScript. Disabled by default.
   bool java_script_enabled = false;
-
-  /// Overrides the native browser user agent for this view. Empty uses the platform default.
-  /// Web iframe hosts cannot override the browser user agent. Changing this value
-  /// affects subsequent navigations; reload explicitly to apply it to the current page.
-  std::string user_agent;
 
   bool operator==(const WebViewProperties&) const = default;
 
@@ -214,7 +209,7 @@ struct WebViewEvents {
   /// Reports the latest coherent navigation snapshot.
   ///
   /// The event is emitted when observable URL, title, loading, progress, or
-  /// history availability changes. Platforms may coalesce native updates.
+  /// history availability changes. Platform backends may coalesce updates.
   struct NavigationChanged : Event<void(const WebViewNavigationState&)> {
     static constexpr std::string_view Name = "navigationChanged";
   };
@@ -308,12 +303,12 @@ public:
   /// Evaluates JavaScript in the current document and reports its result.
   bool EvaluateJavaScript(std::string script, WebViewJavaScriptCompletion completion) const;
 
-  /// Reads the native cookie store for this URL, including HttpOnly cookies.
+  /// Reads the platform cookie store for this URL, including HttpOnly cookies.
   /// Returns a Cookie request-header value. Web cannot expose HttpOnly cookies
   /// and completes with webview/unsupported-cookies. Treat the result as secret.
   bool GetCookies(std::string url, WebViewJavaScriptCompletion completion) const;
 
-  /// Creates or updates a native cookie. The URL supplies the request context.
+  /// Creates or updates a platform cookie. The URL supplies the request context.
   /// An absent expiration creates a session cookie. Completes with an empty
   /// string. Unsupported on Web.
   bool SetCookie(std::string url, WebViewCookie cookie, WebViewJavaScriptCompletion completion) const;
@@ -328,12 +323,12 @@ public:
       WebViewJavaScriptCompletion completion
   ) const;
 
-  /// Reads structured native cookies matching this URL, including HttpOnly
+  /// Reads structured platform cookies matching this URL, including HttpOnly
   /// cookies and their attributes. Unsupported on Android and Web because those
   /// engines cannot expose complete cookie attributes through this API.
   bool GetCookieList(std::string url, WebViewCookieListCompletion completion) const;
 
-  /// Clears ALL cookies in this WebView's native data store (shared with other
+  /// Clears ALL cookies in this WebView's platform data store (shared with other
   /// WebViews using the default store). Completes with an empty string; this
   /// does not clear localStorage or the HTTP cache. Unsupported on Web.
   bool ClearCookies(WebViewJavaScriptCompletion completion) const;
@@ -349,13 +344,8 @@ private:
 /// Retains a WebView controller in the current composition scope.
 ///
 /// One controller may be bound to at most one mounted WebView at a time. Copies
-/// refer to the same retained controller state. Load commands (`LoadHtml`,
-/// `LoadRequest`, `LoadUrl`) are final-state: a call issued before a WebView
-/// connects is retained and replayed once the view mounts, so composition-time
-/// callers cannot lose the first document. The return value still reports
-/// whether a live WebView accepted the call; `true` means accepted, not
-/// completed. Ephemeral commands (reload, stop, history) return `false` when no
-/// compatible live WebView accepts them.
+/// refer to the same retained controller state. Commands return `false` when no
+/// compatible live WebView accepts them; `true` means accepted, not completed.
 inline WebViewController UseWebViewController(
     const std::source_location& location = std::source_location::current()
 ) {

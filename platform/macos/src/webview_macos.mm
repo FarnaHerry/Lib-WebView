@@ -297,7 +297,7 @@ WebViewCookie CookieFromPlatform(NSHTTPCookie* cookie) {
     result.same_site = WebViewCookieSameSite::Lax;
   } else if ([cookie.sameSitePolicy isEqualToString:NSHTTPCookieSameSiteStrict]) {
     result.same_site = WebViewCookieSameSite::Strict;
-  } else if ([cookie.sameSitePolicy isEqualToString:NSHTTPCookieSameSiteNone]) {
+  } else if ([cookie.sameSitePolicy isEqualToString:@"None"]) {
     result.same_site = WebViewCookieSameSite::None;
   }
   return result;
@@ -315,7 +315,7 @@ NSHTTPCookie* CookieToPlatform(const WebViewCookie& cookie) {
         std::chrono::duration<double>(cookie.expires->time_since_epoch()).count()];
   }
   if (cookie.secure) properties[NSHTTPCookieSecure] = @"TRUE";
-  if (cookie.http_only) properties[NSHTTPCookieHttpOnly] = @"TRUE";
+  if (cookie.http_only) properties[@"HTTPOnly"] = @"TRUE";
   NSString* same_site = nil;
   switch (cookie.same_site) {
     case WebViewCookieSameSite::Unspecified:
@@ -327,7 +327,7 @@ NSHTTPCookie* CookieToPlatform(const WebViewCookie& cookie) {
       same_site = NSHTTPCookieSameSiteStrict;
       break;
     case WebViewCookieSameSite::None:
-      same_site = NSHTTPCookieSameSiteNone;
+      same_site = @"None";
       break;
   }
   if (same_site != nil) properties[NSHTTPCookieSameSitePolicy] = same_site;

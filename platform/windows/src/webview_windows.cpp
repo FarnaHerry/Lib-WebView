@@ -636,6 +636,23 @@ void ApplyProperties(const std::shared_ptr<WindowsWebViewInstance>& instance, co
       }
     }
   }
+  COREWEBVIEW2_PREFERRED_COLOR_SCHEME color_scheme = COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO;
+  switch (properties.preferred_color_scheme) {
+  case WebViewPreferredColorScheme::Light:
+    color_scheme = COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT;
+    break;
+  case WebViewPreferredColorScheme::Dark:
+    color_scheme = COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK;
+    break;
+  case WebViewPreferredColorScheme::Auto:
+    break;
+  }
+  ComPtr<ICoreWebView2_13> web_view_13;
+  ComPtr<ICoreWebView2Profile> profile;
+  if (SUCCEEDED(instance->web_view.As(&web_view_13)) &&
+      SUCCEEDED(web_view_13->get_Profile(&profile)) && profile) {
+    profile->put_PreferredColorScheme(color_scheme);
+  }
   if (url_changed) {
     const std::wstring url = Utf8ToWide(properties.url);
     if (url.empty() && !properties.url.empty()) {

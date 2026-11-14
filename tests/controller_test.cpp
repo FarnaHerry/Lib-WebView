@@ -27,6 +27,16 @@ int main() {
     check(loads == 1 && last_url == "https://example.com/two", "last buffered load replays on connect");
     check(buffered.IsConnected(), "buffered controller is connected");
   }
+  const PlatformPayload system_theme = WebViewProperties::Encode({});
+  check(system_theme.AsObject().at("themeBrightness").IsNull(), "system theme encodes as null");
+  const PlatformPayload light_theme = WebViewProperties::Encode({
+      .theme_brightness = ThemeBrightness::Light,
+  });
+  check(light_theme.AsObject().at("themeBrightness").AsString() == "light", "light theme encoding");
+  const PlatformPayload dark_theme = WebViewProperties::Encode({
+      .theme_brightness = ThemeBrightness::Dark,
+  });
+  check(dark_theme.AsObject().at("themeBrightness").AsString() == "dark", "dark theme encoding");
   const WebViewCookie cookie{
       .name = "session",
       .value = "secret",

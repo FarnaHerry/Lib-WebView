@@ -112,15 +112,6 @@ struct WebViewHtml {
   [[nodiscard]] static PlatformPayload Encode(const WebViewHtml& value);
 };
 
-#if defined(_WIN32)
-/// Controls the WebView2 profile color scheme and prefers-color-scheme media query.
-enum class WebViewPreferredColorScheme {
-  Auto,
-  Light,
-  Dark,
-};
-#endif
-
 /// The complete declarative configuration of a WebView.
 ///
 /// `url` is controlled application state. A changed value starts a new
@@ -140,10 +131,10 @@ struct WebViewProperties {
   /// affects subsequent navigations; reload explicitly to apply it to the current page.
   std::string user_agent;
 
-#if defined(_WIN32)
-  /// Overrides the WebView2 profile color scheme. Auto follows the system default.
-  WebViewPreferredColorScheme preferred_color_scheme = WebViewPreferredColorScheme::Auto;
-#endif
+  /// The preferred brightness for web content, or std::nullopt to follow the host environment.
+  /// Windows, iOS, and macOS update the engine preference. Android and Linux follow
+  /// their host; Web uses browser-dependent iframe color-scheme propagation.
+  std::optional<ThemeBrightness> theme_brightness;
 
   bool operator==(const WebViewProperties&) const = default;
 

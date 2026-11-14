@@ -637,15 +637,10 @@ void ApplyProperties(const std::shared_ptr<WindowsWebViewInstance>& instance, co
     }
   }
   COREWEBVIEW2_PREFERRED_COLOR_SCHEME color_scheme = COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO;
-  switch (properties.preferred_color_scheme) {
-  case WebViewPreferredColorScheme::Light:
-    color_scheme = COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT;
-    break;
-  case WebViewPreferredColorScheme::Dark:
-    color_scheme = COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK;
-    break;
-  case WebViewPreferredColorScheme::Auto:
-    break;
+  if (properties.theme_brightness.has_value()) {
+    color_scheme = *properties.theme_brightness == ThemeBrightness::Dark
+                       ? COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK
+                       : COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT;
   }
   ComPtr<ICoreWebView2_13> web_view_13;
   ComPtr<ICoreWebView2Profile> profile;

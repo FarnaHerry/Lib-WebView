@@ -227,7 +227,8 @@ WebView({
 ```
 
 Windows, iOS, and macOS apply this preference before the initial navigation and when the property changes, including
-the `prefers-color-scheme` media query. Restoring `std::nullopt` returns to the system preference.
+the `prefers-color-scheme` media query. Restoring `std::nullopt` returns to the system preference. On Windows, the
+override is scoped to each WebView2 instance and does not change shared Profile preferences.
 
 Android WebView follows the host application's `isLightTheme`; explicit per-view Light and Dark overrides are
 unsupported. The Linux WebKitGTK backend also follows the host environment without an explicit per-view override.

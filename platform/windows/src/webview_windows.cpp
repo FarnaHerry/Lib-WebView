@@ -75,6 +75,7 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   EventRegistrationToken history_changed_token{};
   EventRegistrationToken title_changed_token{};
   EventRegistrationToken web_message_received_token{};
+  EventRegistrationToken new_window_requested_token{};
   EventRegistrationToken accelerator_key_token{};
   // Commands can arrive between the platform view connecting and WebView2 finishing
   // initialization; they are queued instead of being dropped, then drained in order.
@@ -666,6 +667,30 @@ void ApplyProperties(const std::shared_ptr<WindowsWebViewInstance>& instance, co
 void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
   std::weak_ptr<WindowsWebViewInstance> weak_instance = instance;
 
+  instance->web_view->add_NewWindowRequested(
+      Callback<ICoreWebView2NewWindowRequestedEventHandler>(
+          [weak_instance](ICoreWebView2*, ICoreWebView2NewWindowRequestedEventArgs* arguments) -> HRESULT {
+            const auto current = weak_instance.lock();
+            if (!current || current->disposed) {
+              return S_OK;
+            }
+            wchar_t* raw_url = nullptr;
+            BOOL user_initiated = FALSE;
+            arguments->get_Uri(&raw_url);
+            arguments->get_IsUserInitiated(&user_initiated);
+            const std::string url = WideToUtf8(raw_url);
+            CoTaskMemFree(raw_url);
+            const auto handled = current->events.Emit<WebViewEvents::NewWindowRequested>(
+                WebViewNewWindowRequest{.url = url, .user_initiated = user_initiated != FALSE});
+            if (handled.value_or(false)) {
+              return arguments->put_Handled(TRUE);
+            }
+            return S_OK;
+          }
+      ).Get(),
+      &instance->new_window_requested_token
+  );
+
   instance->controller->add_AcceleratorKeyPressed(
       Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
           [weak_instance](ICoreWebView2Controller*, ICoreWebView2AcceleratorKeyPressedEventArgs* arguments) -> HRESULT {
@@ -998,6 +1023,7 @@ void DisposeWindowsWebView(WindowsWebViewInstance& instance) {
     instance.web_view->remove_HistoryChanged(instance.history_changed_token);
     instance.web_view->remove_DocumentTitleChanged(instance.title_changed_token);
     instance.web_view->remove_WebMessageReceived(instance.web_message_received_token);
+    instance.web_view->remove_NewWindowRequested(instance.new_window_requested_token);
   }
   instance.events_attached = false;
   instance.web_view.Reset();

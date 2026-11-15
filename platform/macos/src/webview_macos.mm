@@ -32,7 +32,7 @@ struct MacOSWebViewInstance : std::enable_shared_from_this<MacOSWebViewInstance>
 
 } // namespace huxerui::detail
 
-@interface HUXMacOSWebViewNavigationDelegate : NSObject <WKNavigationDelegate, WKScriptMessageHandler> {
+@interface HUXMacOSWebViewNavigationDelegate : NSObject <WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler> {
  @private
   std::weak_ptr<huxerui::detail::MacOSWebViewInstance> instance_;
 }
@@ -528,6 +528,7 @@ std::shared_ptr<MacOSWebViewInstance> CreateMacOSWebView(
     PlatformEventEmitter events
 ) {
   WKWebViewConfiguration* configuration = [[WKWebViewConfiguration alloc] init];
+  configuration.preferences.javaScriptCanOpenWindowsAutomatically = NO;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
   configuration.preferences.javaScriptEnabled = properties.java_script_enabled;
@@ -545,6 +546,7 @@ std::shared_ptr<MacOSWebViewInstance> CreateMacOSWebView(
   [configuration.userContentController addUserScript:bridge_script];
   instance->view = [[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration];
   instance->view.navigationDelegate = instance->navigation_delegate;
+  instance->view.UIDelegate = instance->navigation_delegate;
   [instance->view addObserver:instance->navigation_delegate
                    forKeyPath:@"estimatedProgress"
                       options:NSKeyValueObservingOptionNew
@@ -582,6 +584,7 @@ void DisposeMacOSWebView(MacOSWebViewInstance& instance) {
     instance.observing_progress = false;
   }
   instance.view.navigationDelegate = nil;
+  instance.view.UIDelegate = nil;
   [instance.view.configuration.userContentController removeScriptMessageHandlerForName:@"huxerui"];
   instance.navigation_delegate = nil;
   instance.view = nil;
@@ -628,6 +631,25 @@ void InstallPlatformWebView(ApplicationContext& root) {
     instance_ = std::move(instance);
   }
   return self;
+}
+
+- (nullable WKWebView*)webView:(WKWebView*)webView
+    createWebViewWithConfiguration:(WKWebViewConfiguration*)configuration
+               forNavigationAction:(WKNavigationAction*)navigationAction
+                    windowFeatures:(WKWindowFeatures*)windowFeatures {
+  WEBVIEW_UNUSED(webView);
+  WEBVIEW_UNUSED(configuration);
+  WEBVIEW_UNUSED(windowFeatures);
+  const auto instance = instance_.lock();
+  NSString* method = navigationAction.request.HTTPMethod;
+  if (instance && !instance->disposed && (method == nil || [method isEqualToString:@"GET"])) {
+    instance->events.Emit<huxerui::WebViewEvents::NewWindowRequested>(
+        huxerui::WebViewNewWindowRequest{
+            .url = huxerui::detail::ToString(navigationAction.request.URL.absoluteString),
+            .user_initiated = true,
+        });
+  }
+  return nil;
 }
 
 - (void)webView:(WKWebView*)webView

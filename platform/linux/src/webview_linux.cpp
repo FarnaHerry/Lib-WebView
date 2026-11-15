@@ -614,6 +614,14 @@ gboolean DecidePolicy(WebKitWebView*, WebKitPolicyDecision* decision, WebKitPoli
   const bool main_frame = target_frame == nullptr || *target_frame == '\0';
   const std::optional<bool> allowed = instance->events.Emit<WebViewEvents::NavigationRequested>(
       WebViewNavigationRequest{.url = uri != nullptr ? uri : "", .is_main_frame = main_frame});
+  if (type == WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION && allowed.value_or(true) && request != nullptr) {
+    const char* method = webkit_uri_request_get_http_method(request);
+    if (method == nullptr || std::string_view(method) == "GET") {
+      instance->events.Emit<WebViewEvents::NewWindowRequested>(
+          WebViewNewWindowRequest{.url = uri != nullptr ? uri : "",
+                                 .user_initiated = webkit_navigation_action_is_user_gesture(action) != FALSE});
+    }
+  }
   if (type == WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION || (allowed.has_value() && !*allowed)) {
     webkit_policy_decision_ignore(decision);
   } else {

@@ -231,6 +231,12 @@ struct WebViewLoadError {
   [[nodiscard]] static WebViewLoadError Decode(const PlatformPayload& payload);
 };
 
+/// A request to open a URL in a new browsing context.
+struct WebViewNewWindowRequest {
+  std::string url;
+  bool user_initiated = false;
+};
+
 /// Typed events emitted by a mounted WebView.
 struct WebViewEvents {
   /// Synchronously asks whether a navigation may proceed.
@@ -269,6 +275,14 @@ struct WebViewEvents {
   /// that the backend can read after the load. Unavailable fields stay empty.
   struct PageMetadataChanged : Event<void(const WebViewPageMetadata&)> {
     static constexpr std::string_view Name = "pageMetadataChanged";
+  };
+
+  /// Reports a request to open a URL in a new browsing context on desktop.
+  /// The request indicates whether the engine attributes it to a user gesture.
+  /// On Windows, return true to suppress the native popup; WebKit backends do not create a popup.
+  /// Opening the URL independently does not transfer the original request or its opener window.
+  struct NewWindowRequested : Event<bool(const WebViewNewWindowRequest&)> {
+    static constexpr std::string_view Name = "newWindowRequested";
   };
 
   /// Reports an unmodified F11 press while the WebView has keyboard focus on

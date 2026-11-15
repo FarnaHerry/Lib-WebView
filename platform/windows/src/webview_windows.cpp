@@ -75,6 +75,7 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   EventRegistrationToken history_changed_token{};
   EventRegistrationToken title_changed_token{};
   EventRegistrationToken web_message_received_token{};
+  EventRegistrationToken accelerator_key_token{};
   // Commands can arrive between the platform view connecting and WebView2 finishing
   // initialization; they are queued instead of being dropped, then drained in order.
   std::vector<WebViewControllerCommand> pending_commands;
@@ -665,6 +666,30 @@ void ApplyProperties(const std::shared_ptr<WindowsWebViewInstance>& instance, co
 void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
   std::weak_ptr<WindowsWebViewInstance> weak_instance = instance;
 
+  instance->controller->add_AcceleratorKeyPressed(
+      Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
+          [weak_instance](ICoreWebView2Controller*, ICoreWebView2AcceleratorKeyPressedEventArgs* arguments) -> HRESULT {
+            const auto current = weak_instance.lock();
+            UINT key = 0;
+            COREWEBVIEW2_KEY_EVENT_KIND kind{};
+            COREWEBVIEW2_PHYSICAL_KEY_STATUS status{};
+            if (!current || current->disposed ||
+                FAILED(arguments->get_VirtualKey(&key)) || key != VK_F11 ||
+                FAILED(arguments->get_KeyEventKind(&kind)) || kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN ||
+                FAILED(arguments->get_PhysicalKeyStatus(&status)) || status.WasKeyDown || status.IsMenuKeyDown ||
+                (GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_SHIFT) & 0x8000) ||
+                (GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000)) {
+              return S_OK;
+            }
+            if (current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false)) {
+              return arguments->put_Handled(TRUE);
+            }
+            return S_OK;
+          }
+      ).Get(),
+      &instance->accelerator_key_token
+  );
+
   instance->web_view->add_NavigationStarting(
       Callback<ICoreWebView2NavigationStartingEventHandler>(
           [weak_instance](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* arguments) -> HRESULT {
@@ -978,6 +1003,7 @@ void DisposeWindowsWebView(WindowsWebViewInstance& instance) {
   instance.web_view.Reset();
   instance.environment.Reset();
   if (instance.controller) {
+    instance.controller->remove_AcceleratorKeyPressed(instance.accelerator_key_token);
     instance.controller->Close();
     instance.controller.Reset();
   }

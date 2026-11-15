@@ -271,6 +271,13 @@ struct WebViewEvents {
     static constexpr std::string_view Name = "pageMetadataChanged";
   };
 
+  /// Reports an unmodified F11 press while the WebView has keyboard focus on
+  /// Windows, Linux, and macOS. Return true to consume it. Schedule window
+  /// changes after this synchronous callback returns.
+  struct FullscreenShortcut : Event<bool()> {
+    static constexpr std::string_view Name = "fullscreenShortcut";
+  };
+
   /// Delivers text posted by page JavaScript through `huxerui.postMessage`.
   ///
   /// Treat every message as untrusted input. Availability depends on page

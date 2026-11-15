@@ -26,6 +26,10 @@ struct LinuxWebViewInstance : std::enable_shared_from_this<LinuxWebViewInstance>
   WebViewProperties properties;
   PlatformEventEmitter events;
   std::int64_t metadata_document_id = 0;
+  GtkEventController* fullscreen_key_controller = nullptr;
+  GtkEventController* fullscreen_focus_controller = nullptr;
+  std::optional<guint> fullscreen_keycode;
+  bool fullscreen_key_handled = false;
   bool loading = false;
   bool load_failed = false;
   bool disposed = false;
@@ -667,6 +671,29 @@ void NavigationPropertyChanged(GObject*, GParamSpec*, gpointer data) {
   }
 }
 
+gboolean FullscreenKeyPressed(GtkEventControllerKey*, guint key, guint code, GdkModifierType state, gpointer data) {
+  auto& instance = *static_cast<LinuxWebViewInstance*>(data);
+  constexpr auto modifiers = GDK_SHIFT_MASK | GDK_CONTROL_MASK | GDK_ALT_MASK |
+      GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK;
+  if (instance.disposed || key != GDK_KEY_F11) return FALSE;
+  if (instance.fullscreen_keycode == code) return instance.fullscreen_key_handled;
+
+  const auto current = instance.shared_from_this();
+  current->fullscreen_keycode = code;
+  current->fullscreen_key_handled = (state & modifiers) == 0 &&
+      current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false);
+  return current->fullscreen_key_handled;
+}
+
+void FullscreenKeyReleased(GtkEventControllerKey*, guint, guint code, GdkModifierType, gpointer data) {
+  auto& instance = *static_cast<LinuxWebViewInstance*>(data);
+  if (instance.fullscreen_keycode == code) instance.fullscreen_keycode.reset();
+}
+
+void FullscreenFocusLeft(GtkEventControllerFocus*, gpointer data) {
+  static_cast<LinuxWebViewInstance*>(data)->fullscreen_keycode.reset();
+}
+
 std::shared_ptr<LinuxWebViewInstance> CreateLinuxWebView(GtkWidget* parent, const WebViewProperties& properties,
                                                          PlatformEventEmitter events) {
   if (parent == nullptr || !GTK_IS_FIXED(parent)) {
@@ -708,6 +735,17 @@ std::shared_ptr<LinuxWebViewInstance> CreateLinuxWebView(GtkWidget* parent, cons
   g_signal_connect(instance->web_view, "notify::title", G_CALLBACK(NavigationPropertyChanged), instance.get());
   g_signal_connect(instance->web_view, "notify::can-go-back", G_CALLBACK(NavigationPropertyChanged), instance.get());
   g_signal_connect(instance->web_view, "notify::can-go-forward", G_CALLBACK(NavigationPropertyChanged), instance.get());
+
+  instance->fullscreen_key_controller = gtk_event_controller_key_new();
+  gtk_event_controller_set_propagation_phase(instance->fullscreen_key_controller, GTK_PHASE_CAPTURE);
+  g_signal_connect(instance->fullscreen_key_controller, "key-pressed", G_CALLBACK(FullscreenKeyPressed), instance.get());
+  g_signal_connect(instance->fullscreen_key_controller, "key-released", G_CALLBACK(FullscreenKeyReleased), instance.get());
+  gtk_widget_add_controller(widget, instance->fullscreen_key_controller);
+
+  instance->fullscreen_focus_controller = gtk_event_controller_focus_new();
+  g_signal_connect(instance->fullscreen_focus_controller, "leave", G_CALLBACK(FullscreenFocusLeft), instance.get());
+  gtk_widget_add_controller(widget, instance->fullscreen_focus_controller);
+
   ApplyProperties(instance, properties, true);
   return instance;
 }
@@ -717,6 +755,9 @@ void DisposeLinuxWebView(LinuxWebViewInstance& instance) {
   if (instance.web_view == nullptr) {
     return;
   }
+  GtkWidget* widget = GTK_WIDGET(instance.web_view);
+  gtk_widget_remove_controller(widget, instance.fullscreen_key_controller);
+  gtk_widget_remove_controller(widget, instance.fullscreen_focus_controller);
   webkit_web_view_stop_loading(instance.web_view);
   WebKitUserContentManager* manager = webkit_web_view_get_user_content_manager(instance.web_view);
   g_signal_handlers_disconnect_by_data(manager, &instance);

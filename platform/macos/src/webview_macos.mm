@@ -1,3 +1,4 @@
+#import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
 
 #include <algorithm>
@@ -24,6 +25,7 @@ struct MacOSWebViewInstance : std::enable_shared_from_this<MacOSWebViewInstance>
   PlatformEventEmitter events;
   std::int64_t metadata_document_id = 0;
   WKNavigation* metadata_navigation = nil;
+  id fullscreen_key_monitor = nil;
   bool disposed = false;
   bool observing_progress = false;
 };
@@ -548,12 +550,32 @@ std::shared_ptr<MacOSWebViewInstance> CreateMacOSWebView(
                       options:NSKeyValueObservingOptionNew
                       context:nullptr];
   instance->observing_progress = true;
+  std::weak_ptr<MacOSWebViewInstance> weak = instance;
+  instance->fullscreen_key_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+      handler:^NSEvent*(NSEvent* event) {
+        constexpr NSEventModifierFlags modifiers = NSEventModifierFlagShift | NSEventModifierFlagControl |
+            NSEventModifierFlagOption | NSEventModifierFlagCommand;
+        if (event.isARepeat || (event.modifierFlags & modifiers) != 0) return event;
+        NSString* characters = event.charactersIgnoringModifiers;
+        if (characters.length != 1 || [characters characterAtIndex:0] != NSF11FunctionKey) return event;
+
+        const auto current = weak.lock();
+        if (!current || current->disposed || event.window == nil || event.window != current->view.window) return event;
+        NSResponder* responder = event.window.firstResponder;
+        if (![responder isKindOfClass:[NSView class]] ||
+            ![(NSView*)responder isDescendantOf:current->view]) return event;
+        return current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false) ? nil : event;
+      }];
   ApplyProperties(instance, properties, true);
   return instance;
 }
 
 void DisposeMacOSWebView(MacOSWebViewInstance& instance) {
   instance.disposed = true;
+  if (instance.fullscreen_key_monitor != nil) {
+    [NSEvent removeMonitor:instance.fullscreen_key_monitor];
+    instance.fullscreen_key_monitor = nil;
+  }
   [instance.view stopLoading];
   if (instance.observing_progress) {
     [instance.view removeObserver:instance.navigation_delegate forKeyPath:@"estimatedProgress"];

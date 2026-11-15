@@ -260,6 +260,7 @@ Events are attached to the `WebView` declaration with `.On<Event>(handler)`.
 | `WebViewEvents::LoadFinished` | Observe successful completion |
 | `WebViewEvents::LoadFailed` | Receive a platform diagnostic code, message, and optional URL |
 | `WebViewEvents::PageMetadataChanged` | Receive a main document's declared icon URLs, description, and theme color |
+| `WebViewEvents::FullscreenShortcut` | Handle plain F11 while a Windows, Linux, or macOS WebView has keyboard focus |
 | `WebViewEvents::MessageReceived` | Receive text posted by page JavaScript |
 
 Return `false` from `NavigationRequested` to cancel a request. The decision is synchronous; do not start asynchronous
@@ -272,6 +273,9 @@ policy work from the handler.
 ```
 
 In this example, `IsAllowedNavigation` is an application-defined policy that validates the complete URL.
+
+Return `true` from `FullscreenShortcut` to consume F11. If you handle it, use a task scope to schedule the window's
+fullscreen change after the callback returns. The WebView only receives keys delivered by the host OS.
 
 Browser-hosted cross-origin pages may expose approximate navigation state. Unavailable titles are empty and unavailable
 history actions are `false`.

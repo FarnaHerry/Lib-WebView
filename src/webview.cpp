@@ -88,6 +88,13 @@ PlatformPayload WebViewHtml::Encode(const WebViewHtml& value) {
 
 PlatformPayload WebViewProperties::Encode(const WebViewProperties& value) {
   return PlatformPayload::Object{
+      {"backgroundColor", PlatformPayload::Object{
+          {"alpha", static_cast<double>(value.background_color.alpha)},
+          {"blue", static_cast<double>(value.background_color.blue)},
+          {"green", static_cast<double>(value.background_color.green)},
+          {"red", static_cast<double>(value.background_color.red)},
+      }},
+      {"domStorageEnabled", value.dom_storage_enabled},
       {"javaScriptEnabled", value.java_script_enabled},
       {"themeBrightness", value.theme_brightness.has_value()
           ? PlatformPayload(*value.theme_brightness == ThemeBrightness::Dark ? "dark" : "light")

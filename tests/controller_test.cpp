@@ -30,14 +30,26 @@ int main() {
 
   const PlatformPayload system_theme = WebViewProperties::Encode({});
   check(system_theme.AsObject().at("themeBrightness").IsNull(), "system theme encodes as null");
+  check(!system_theme.AsObject().at("domStorageEnabled").AsBoolean(), "DOM storage is off by default");
+  check(system_theme.AsObject().at("backgroundColor").AsObject().at("alpha").AsDouble() == 0.0,
+        "WebView surface is transparent by default");
   const PlatformPayload light_theme = WebViewProperties::Encode({
       .theme_brightness = ThemeBrightness::Light,
   });
   check(light_theme.AsObject().at("themeBrightness").AsString() == "light", "light theme encoding");
   const PlatformPayload dark_theme = WebViewProperties::Encode({
+      .user_agent = "Test WebView",
       .theme_brightness = ThemeBrightness::Dark,
+      .dom_storage_enabled = true,
+      .background_color = Color{.red = 1.0F, .green = 0.5F, .blue = 0.25F, .alpha = 0.75F},
   });
   check(dark_theme.AsObject().at("themeBrightness").AsString() == "dark", "dark theme encoding");
+  check(dark_theme.AsObject().at("userAgent").AsString() == "Test WebView", "custom user agent encoding");
+  check(dark_theme.AsObject().at("domStorageEnabled").AsBoolean(), "DOM storage opt-in encoding");
+  const auto& background = dark_theme.AsObject().at("backgroundColor").AsObject();
+  check(background.at("red").AsDouble() == 1.0 && background.at("green").AsDouble() == 0.5 &&
+            background.at("blue").AsDouble() == 0.25 && background.at("alpha").AsDouble() == 0.75,
+        "surface color channel encoding");
   const WebViewCookie cookie{
       .name = "session",
       .value = "secret",

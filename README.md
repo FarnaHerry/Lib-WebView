@@ -184,6 +184,10 @@ or another bounded parent layout.
 different from the current property value. Write `WebViewNavigationState::url` back to the same state when links,
 redirects, or browser history should become the new controlled value.
 
+On Android, set `dom_storage_enabled` when hosted pages require `localStorage` or
+`sessionStorage`. `background_color` controls the Android WebView surface shown
+before the first document paint and between navigations. The default is transparent.
+
 Use `LoadUrl` as a convenient imperative GET entry point:
 
 ```cpp

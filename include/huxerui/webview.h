@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include <huxerui/color.h>
 #include <huxerui/event.h>
 #include <huxerui/platform_registry.h>
 #include <huxerui/app.h>
@@ -135,6 +136,12 @@ struct WebViewProperties {
   /// Windows, iOS, and macOS update the engine preference. Android follows the
   /// host application; Web uses browser-dependent iframe color-scheme propagation.
   std::optional<ThemeBrightness> theme_brightness;
+
+  /// Enables DOM storage such as localStorage and sessionStorage on Android.
+  bool dom_storage_enabled = false;
+
+  /// The Android WebView surface color before and between document paints.
+  Color background_color = Color::Transparent();
 
   bool operator==(const WebViewProperties&) const = default;
 

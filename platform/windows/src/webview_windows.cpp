@@ -176,7 +176,8 @@ WebViewNavigationState NavigationState(const std::shared_ptr<WindowsWebViewInsta
   const std::string title = WideToUtf8(title_value);
   CoTaskMemFree(title_value);
   return {
-      .url = CurrentUrl(*instance),
+      // NavigationStarting precedes the Source update; properties holds its URI.
+      .url = instance->loading ? instance->properties.url : CurrentUrl(*instance),
       .title = title,
       .is_loading = instance->loading,
       .progress = instance->loading ? 0.0 : 1.0,
@@ -635,6 +636,20 @@ void ApplyProperties(const std::shared_ptr<WindowsWebViewInstance>& instance, co
       }
     }
   }
+  const wchar_t* media_parameters = L"{\"media\":\"\",\"features\":[]}";
+  if (properties.theme_brightness.has_value()) {
+    media_parameters = *properties.theme_brightness == ThemeBrightness::Dark
+                           ? L"{\"features\":[{\"name\":\"prefers-color-scheme\",\"value\":\"dark\"}]}"
+                           : L"{\"features\":[{\"name\":\"prefers-color-scheme\",\"value\":\"light\"}]}";
+  }
+  // PreferredColorScheme is profile-wide; keep the override scoped to this WebView2 instance.
+  instance->web_view->CallDevToolsProtocolMethod(
+      L"Emulation.setEmulatedMedia",
+      media_parameters,
+      Callback<ICoreWebView2CallDevToolsProtocolMethodCompletedHandler>(
+          [](HRESULT, LPCWSTR) { return S_OK; }
+      ).Get()
+  );
   if (url_changed) {
     const std::wstring url = Utf8ToWide(properties.url);
     if (url.empty() && !properties.url.empty()) {

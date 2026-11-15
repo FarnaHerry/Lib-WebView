@@ -252,6 +252,14 @@ void ApplyProperties(
 #pragma clang diagnostic pop
   instance->view.customUserAgent = properties.user_agent.empty() ? nil : ToNSString(properties.user_agent);
 
+  UIUserInterfaceStyle style = UIUserInterfaceStyleUnspecified;
+  if (properties.theme_brightness.has_value()) {
+    style = *properties.theme_brightness == ThemeBrightness::Dark
+                ? UIUserInterfaceStyleDark
+                : UIUserInterfaceStyleLight;
+  }
+  instance->view.overrideUserInterfaceStyle = style;
+
   if (url_changed) {
     LoadUrl(instance, properties.url);
   }

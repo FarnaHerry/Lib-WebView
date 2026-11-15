@@ -131,6 +131,11 @@ struct WebViewProperties {
   /// affects subsequent navigations; reload explicitly to apply it to the current page.
   std::string user_agent;
 
+  /// The preferred brightness for web content, or std::nullopt to follow the host environment.
+  /// Windows, iOS, and macOS update the engine preference. Android follows the
+  /// host application; Web uses browser-dependent iframe color-scheme propagation.
+  std::optional<ThemeBrightness> theme_brightness;
+
   bool operator==(const WebViewProperties&) const = default;
 
   /// Encodes the value for a cross-language PlatformView adapter.

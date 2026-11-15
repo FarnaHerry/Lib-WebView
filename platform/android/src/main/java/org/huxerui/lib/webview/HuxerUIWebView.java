@@ -28,7 +28,7 @@ import java.nio.charset.StandardCharsets;
 
 public final class HuxerUIWebView implements HuxerUIPlatformView {
     private static final Set<String> PROPERTY_FIELDS = new LinkedHashSet<>(
-            Arrays.asList("javaScriptEnabled", "url", "userAgent")
+            Arrays.asList("javaScriptEnabled", "themeBrightness", "url", "userAgent")
     );
     private static final Set<String> REQUEST_FIELDS = new LinkedHashSet<>(
             Arrays.asList("body", "headers", "method", "url")
@@ -127,19 +127,29 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
         final String url;
         final boolean javaScriptEnabled;
         final String userAgent;
+        final String themeBrightness;
 
-        Properties(String url, boolean javaScriptEnabled, String userAgent) {
+        Properties(String url, boolean javaScriptEnabled, String userAgent, String themeBrightness) {
             this.url = url;
             this.javaScriptEnabled = javaScriptEnabled;
             this.userAgent = userAgent;
+            this.themeBrightness = themeBrightness;
         }
 
         static Properties decode(PlatformPayload payload) {
             payload.rejectUnknownFields(PROPERTY_FIELDS);
+            PlatformPayload themeBrightness = payload.requireField("themeBrightness");
+            String themeBrightnessValue = themeBrightness.isNull() ? null : themeBrightness.requireString();
+            if (themeBrightnessValue != null
+                    && !"light".equals(themeBrightnessValue)
+                    && !"dark".equals(themeBrightnessValue)) {
+                throw new IllegalArgumentException("Unknown WebView theme brightness: " + themeBrightnessValue);
+            }
             return new Properties(
                     payload.requireField("url").requireString(),
                     payload.requireField("javaScriptEnabled").requireBoolean(),
-                    payload.requireField("userAgent").requireString()
+                    payload.requireField("userAgent").requireString(),
+                    themeBrightnessValue
             );
         }
     }
@@ -487,7 +497,12 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
-            properties = new Properties(url == null ? "" : url, properties.javaScriptEnabled, properties.userAgent);
+            properties = new Properties(
+                    url == null ? "" : url,
+                    properties.javaScriptEnabled,
+                    properties.userAgent,
+                    properties.themeBrightness
+            );
             loading = true;
             emitStateEvent("loadStarted");
             emitNavigationState();

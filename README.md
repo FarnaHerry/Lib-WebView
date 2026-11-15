@@ -10,7 +10,8 @@ for navigation, custom requests, HTML content, JavaScript evaluation, page-to-ap
 browser state.
 
 The library uses the platform web engine and integrates it as a HuxerUI `PlatformView` on Android, iOS,
-macOS, Windows, and Web. On Linux with HuxerUI 0.4.0, `InstallWebView` throws `std::logic_error`.
+macOS, Windows, Web, and Linux with the HuxerUI fork's GTK4 `PlatformView` host.
+On Linux with an SDK that lacks this host, `InstallWebView` throws `std::logic_error`.
 
 ## Preview
 
@@ -82,6 +83,7 @@ macOS, Windows, and Web. On Linux with HuxerUI 0.4.0, `InstallWebView` throws `s
 | --- | --- | --- |
 | Android | Android WebView | Android API 23 or later |
 | iOS | WKWebView | iOS 15 or later |
+| Linux | WebKitGTK | Requires the HuxerUI fork's GTK4 `PlatformView` host and WebKitGTK 6.0 ≥ 2.40 |
 | macOS | WKWebView | WebKit is linked by the library |
 | Windows | WebView2 | Downloads the WebView2 SDK when building and requires the WebView2 Runtime when running |
 | Web | iframe | Subject to browser embedding and cross-origin restrictions |
@@ -108,6 +110,10 @@ Include the public API with:
 
 On Windows, the first configure downloads the pinned Microsoft WebView2 SDK. Set `WEBVIEW2_SDK_ROOT` to an extracted
 Microsoft WebView2 NuGet package root to use a local SDK, including for offline builds.
+
+On Linux, the fork's GTK4 host enables the WebKitGTK backend. CMake uses WebKitGTK 6.0 ≥ 2.40 from `pkg-config`
+when available. The source fallback builds WebKitGTK 2.54.2 in the build directory and requires Ninja and the
+WebKitGTK build dependencies, including GTK4 and libsoup 3 development packages.
 
 ## Quick start
 
@@ -235,8 +241,8 @@ Windows, iOS, and macOS apply this preference before the initial navigation and 
 the `prefers-color-scheme` media query. Restoring `std::nullopt` returns to the system preference. On Windows, the
 override is scoped to each WebView2 instance and does not change shared Profile preferences.
 
-Android WebView follows the host application's `isLightTheme`; explicit per-view Light and Dark overrides are
-unsupported. Web uses iframe `color-scheme` propagation, so behavior depends on browser support and the embedded
+Android WebView follows the host application's `isLightTheme`; Linux WebKitGTK follows the host environment.
+Web uses iframe `color-scheme` propagation, so behavior depends on browser support and the embedded
 page's own color-scheme support. Cross-origin preference propagation does not grant DOM or script access, and normal
 iframe embedding policies still apply.
 
@@ -347,7 +353,7 @@ The complete public contract and user-facing API comments are available in
 specific URL, including HttpOnly cookies, and returns a `Cookie` request-header
 value. Treat this value as a credential: do not log it or expose it to page
 JavaScript. Supported by Android CookieManager, WKHTTPCookieStore on iOS/macOS,
-and WebView2 CookieManager on Windows. Web completes with
+WebView2 CookieManager on Windows, and WebKitCookieManager on Linux. Web completes with
 `webview/unsupported-cookies`; iframe script access cannot expose HttpOnly cookies.
 
 `controller.SetCookie(url, cookie, completion)` creates or updates a platform cookie.
@@ -361,7 +367,7 @@ with an empty string.
 
 `controller.GetCookieList(url, completion)` returns structured cookies, including
 their attributes, through `PlatformResult<std::vector<WebViewCookie>>`. It is
-supported on iOS/macOS and Windows. Android CookieManager exposes only
+supported on iOS/macOS, Windows, and Linux. Android CookieManager exposes only
 request-header values, so Android completes with
 `webview/unsupported-cookie-details` instead of inventing unavailable attributes.
 All three new operations complete with `webview/unsupported-cookies` on Web.

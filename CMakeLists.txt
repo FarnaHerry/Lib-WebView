@@ -89,6 +89,23 @@ target_include_directories(webview PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+_huxerui_select_framework_target(webview_framework_target)
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    get_target_property(webview_sdk_include_dirs ${webview_framework_target} INTERFACE_INCLUDE_DIRECTORIES)
+    foreach (webview_sdk_include_dir IN LISTS webview_sdk_include_dirs)
+        string(REGEX REPLACE "^\\$<BUILD_INTERFACE:(.*)>$" "\\1"
+                webview_sdk_include_dir "${webview_sdk_include_dir}")
+        if (EXISTS "${webview_sdk_include_dir}/huxerui/linux/platform_registry.h")
+            target_sources(webview PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/webview_linux.cpp")
+            target_compile_definitions(webview PRIVATE HUXERUI_WEBVIEW_HAS_LINUX_PLATFORM_VIEW)
+            include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/WebKitGTK.cmake")
+            huxerui_link_webkitgtk(webview)
+            break()
+        endif ()
+    endforeach ()
+endif ()
+
 if (APPLE)
     target_link_libraries(webview PRIVATE "-framework WebKit")
 endif ()
@@ -139,6 +156,6 @@ if (WEBVIEW_BUILD_TESTS)
     add_executable(webview_controller_test tests/controller_test.cpp)
     target_compile_features(webview_controller_test PRIVATE cxx_std_20)
     target_include_directories(webview_controller_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-    target_link_libraries(webview_controller_test PRIVATE HuxerUI::WebView HuxerUI::huxerui)
+    target_link_libraries(webview_controller_test PRIVATE HuxerUI::WebView ${webview_framework_target})
     add_test(NAME webview_controller COMMAND webview_controller_test)
 endif ()

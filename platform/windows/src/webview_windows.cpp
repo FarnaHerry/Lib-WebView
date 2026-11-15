@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -30,6 +31,13 @@ using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
 
 constexpr wchar_t web_view_window_class[] = L"HuxerUI.WebView.Host";
+
+COREWEBVIEW2_COLOR OpaqueBackgroundColor(Color color) {
+  const auto channel = [](float value) -> BYTE {
+    return std::isfinite(value) ? static_cast<BYTE>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F) : 0;
+  };
+  return {255, channel(color.red), channel(color.green), channel(color.blue)};
+}
 
 std::string WideToUtf8(const wchar_t* value) {
   if (value == nullptr || *value == L'\0') {
@@ -69,6 +77,7 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   ComPtr<ICoreWebView2Environment> environment;
   ComPtr<ICoreWebView2Controller> controller;
   ComPtr<ICoreWebView2> web_view;
+  std::optional<COREWEBVIEW2_COLOR> default_background_color;
   std::optional<std::wstring> default_user_agent;
   EventRegistrationToken navigation_starting_token{};
   EventRegistrationToken navigation_completed_token{};
@@ -83,6 +92,14 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   bool events_attached = false;
   bool loading = false;
   bool disposed = false;
+
+  void UpdateBackgroundColor(ICoreWebView2Controller2* controller2) const {
+    if (properties.background_color.alpha > 0.0F) {
+      controller2->put_DefaultBackgroundColor(OpaqueBackgroundColor(properties.background_color));
+    } else if (default_background_color) {
+      controller2->put_DefaultBackgroundColor(*default_background_color);
+    }
+  }
 
   void UpdateBounds() const {
     if (!controller || window == nullptr) {
@@ -102,7 +119,16 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
       SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(instance));
     }
     if (instance != nullptr) {
-      if (message == WM_SIZE) {
+      if (message == WM_ERASEBKGND && instance->properties.background_color.alpha > 0.0F) {
+        const auto background = OpaqueBackgroundColor(instance->properties.background_color);
+        const auto dc = reinterpret_cast<HDC>(word);
+        RECT bounds{};
+        GetClientRect(window, &bounds);
+        const COLORREF previous = SetDCBrushColor(dc, RGB(background.R, background.G, background.B));
+        FillRect(dc, &bounds, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+        SetDCBrushColor(dc, previous);
+        return 1;
+      } else if (message == WM_SIZE) {
         instance->UpdateBounds();
       } else if (message == WM_SETFOCUS && instance->controller) {
         instance->controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
@@ -614,7 +640,15 @@ void EmitLoadError(
 
 void ApplyProperties(const std::shared_ptr<WindowsWebViewInstance>& instance, const WebViewProperties& properties) {
   const bool url_changed = instance->properties.url != properties.url;
+  const bool background_changed = instance->properties.background_color != properties.background_color;
   instance->properties = properties;
+  if (background_changed) {
+    InvalidateRect(instance->window, nullptr, TRUE);
+    ComPtr<ICoreWebView2Controller2> controller2;
+    if (instance->controller && SUCCEEDED(instance->controller.As(&controller2))) {
+      instance->UpdateBackgroundColor(controller2.Get());
+    }
+  }
   if (!instance->web_view) {
     return;
   }
@@ -894,6 +928,16 @@ void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) 
                             "Could not create the WebView2 view"
                         );
                         return S_OK;
+                      }
+                      ComPtr<ICoreWebView2Controller2> controller2;
+                      if (SUCCEEDED(value->controller.As(&controller2))) {
+                        COREWEBVIEW2_COLOR default_color{};
+                        if (SUCCEEDED(controller2->get_DefaultBackgroundColor(&default_color))) {
+                          value->default_background_color = default_color;
+                        }
+                        if (value->properties.background_color.alpha > 0.0F) {
+                          value->UpdateBackgroundColor(controller2.Get());
+                        }
                       }
                       value->UpdateBounds();
                       AttachEvents(value);

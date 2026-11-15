@@ -191,8 +191,7 @@ different from the current property value. Write `WebViewNavigationState::url` b
 redirects, or browser history should become the new controlled value.
 
 On Android, set `dom_storage_enabled` when hosted pages require `localStorage` or
-`sessionStorage`. `background_color` controls the Android WebView surface shown
-before the first document paint and between navigations. The default is transparent.
+`sessionStorage`. `background_color` controls the Android and Windows WebView surface before the first document paint and between navigations. Android defaults to transparent. Windows uses the WebView2 default for zero alpha and an opaque RGB background for positive alpha.
 
 Use `LoadUrl` as a convenient imperative GET entry point:
 

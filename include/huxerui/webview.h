@@ -141,7 +141,8 @@ struct WebViewProperties {
   /// Enables DOM storage such as localStorage and sessionStorage on Android.
   bool dom_storage_enabled = false;
 
-  /// The Android WebView surface color before and between document paints.
+  /// The native surface color before and between document paints on Android and Windows.
+  /// Windows uses its platform default for zero alpha and an opaque RGB color otherwise.
   Color background_color = Color::Transparent();
 
   bool operator==(const WebViewProperties&) const = default;

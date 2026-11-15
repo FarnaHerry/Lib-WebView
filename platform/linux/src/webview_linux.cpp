@@ -25,6 +25,7 @@ struct LinuxWebViewInstance : std::enable_shared_from_this<LinuxWebViewInstance>
   WebKitWebView* web_view = nullptr;
   WebViewProperties properties;
   PlatformEventEmitter events;
+  std::int64_t metadata_document_id = 0;
   bool loading = false;
   bool load_failed = false;
   bool disposed = false;
@@ -627,6 +628,7 @@ void LoadChanged(WebKitWebView*, WebKitLoadEvent event, gpointer data) {
   case WEBKIT_LOAD_STARTED:
     instance->loading = true;
     instance->load_failed = false;
+    BeginPageMetadata(*instance);
     EmitNavigationState<WebViewEvents::LoadStarted>(instance);
     break;
   case WEBKIT_LOAD_REDIRECTED:
@@ -635,7 +637,11 @@ void LoadChanged(WebKitWebView*, WebKitLoadEvent event, gpointer data) {
   case WEBKIT_LOAD_FINISHED:
     instance->loading = false;
     if (!instance->load_failed) {
+      const auto document_id = instance->metadata_document_id;
       EmitNavigationState<WebViewEvents::LoadFinished>(instance);
+      if (!instance->disposed && instance->metadata_document_id == document_id) {
+        EvaluateJavaScript(instance, ReadPageMetadata(instance, document_id));
+      }
     }
     break;
   }

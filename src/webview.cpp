@@ -96,6 +96,7 @@ PlatformPayload WebViewProperties::Encode(const WebViewProperties& value) {
       }},
       {"domStorageEnabled", value.dom_storage_enabled},
       {"javaScriptEnabled", value.java_script_enabled},
+      {"pageMetadataScript", detail::web_view_page_metadata_script},
       {"themeBrightness", value.theme_brightness.has_value()
           ? PlatformPayload(*value.theme_brightness == ThemeBrightness::Dark ? "dark" : "light")
           : PlatformPayload{}},

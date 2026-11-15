@@ -22,6 +22,8 @@ struct MacOSWebViewInstance : std::enable_shared_from_this<MacOSWebViewInstance>
   HUXMacOSWebViewNavigationDelegate* navigation_delegate = nil;
   WebViewProperties properties;
   PlatformEventEmitter events;
+  std::int64_t metadata_document_id = 0;
+  WKNavigation* metadata_navigation = nil;
   bool disposed = false;
   bool observing_progress = false;
 };
@@ -627,10 +629,11 @@ void InstallPlatformWebView(ApplicationContext& root) {
 }
 
 - (void)webView:(WKWebView*)webView didStartProvisionalNavigation:(WKNavigation*)navigation {
-  WEBVIEW_UNUSED(navigation);
   std::shared_ptr<huxerui::detail::MacOSWebViewInstance> instance = instance_.lock();
-  if (instance) {
+  if (instance && !instance->disposed) {
     instance->properties.url = huxerui::detail::ToString(webView.URL.absoluteString);
+    instance->metadata_navigation = navigation;
+    huxerui::detail::BeginPageMetadata(*instance);
   }
   huxerui::detail::EmitStateEvent<huxerui::WebViewEvents::LoadStarted>(instance, true);
   huxerui::detail::EmitNavigationState(instance, true);
@@ -644,10 +647,14 @@ void InstallPlatformWebView(ApplicationContext& root) {
 
 - (void)webView:(WKWebView*)webView didFinishNavigation:(WKNavigation*)navigation {
   WEBVIEW_UNUSED(webView);
-  WEBVIEW_UNUSED(navigation);
   std::shared_ptr<huxerui::detail::MacOSWebViewInstance> instance = instance_.lock();
+  const auto document_id = instance ? instance->metadata_document_id : 0;
   huxerui::detail::EmitStateEvent<huxerui::WebViewEvents::LoadFinished>(instance, false);
   huxerui::detail::EmitNavigationState(instance, false);
+  if (instance && !instance->disposed && navigation == instance->metadata_navigation &&
+      document_id == instance->metadata_document_id) {
+    huxerui::detail::EvaluateJavaScript(instance, huxerui::detail::ReadPageMetadata(instance, document_id));
+  }
 }
 
 - (void)webView:(WKWebView*)webView

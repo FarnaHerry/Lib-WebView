@@ -259,6 +259,7 @@ Events are attached to the `WebView` declaration with `.On<Event>(handler)`.
 | `WebViewEvents::LoadStarted` | Observe the start of a top-level load |
 | `WebViewEvents::LoadFinished` | Observe successful completion |
 | `WebViewEvents::LoadFailed` | Receive a platform diagnostic code, message, and optional URL |
+| `WebViewEvents::PageMetadataChanged` | Receive a main document's declared icon URLs, description, and theme color |
 | `WebViewEvents::MessageReceived` | Receive text posted by page JavaScript |
 
 Return `false` from `NavigationRequested` to cancel a request. The decision is synchronous; do not start asynchronous
@@ -274,6 +275,26 @@ In this example, `IsAllowedNavigation` is an application-defined policy that val
 
 Browser-hosted cross-origin pages may expose approximate navigation state. Unavailable titles are empty and unavailable
 history actions are `false`.
+
+## Page metadata
+
+Attach `PageMetadataChanged` to each WebView and retain the snapshot in that view's composition scope:
+
+```cpp
+auto metadata = UseState(WebViewPageMetadata{});
+return WebView({.url = requested_url, .java_script_enabled = true}, controller)
+    .On<WebViewEvents::PageMetadataChanged>([metadata](const WebViewPageMetadata& value) {
+      metadata = value;
+    });
+```
+
+Each main document load begins with an empty snapshot. The document ID is local to the mounted WebView. When the load
+finishes, the backend emits the metadata it can read and discards results from superseded loads. The snapshot includes
+resolved icon candidates in document order, the page description, and the applicable `<meta name="theme-color">` value.
+Icon URLs and text come from the page and should be treated as untrusted input.
+
+Android and Web require JavaScript to be enabled for collection. Web can read only iframe documents the host can access.
+Metadata is sampled once per main document load. Titles and current URLs are available from `NavigationChanged`.
 
 ## JavaScript
 

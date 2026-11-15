@@ -22,6 +22,7 @@ struct WebPlatformViewInstance : std::enable_shared_from_this<WebPlatformViewIns
   WebViewProperties properties;
   std::optional<WebViewHtml> html;
   PlatformEventEmitter events;
+  std::int64_t metadata_document_id = 0;
   bool loading = false;
   bool disposed = false;
 };
@@ -180,24 +181,28 @@ void ApplyThemeBrightness(WebPlatformViewInstance& instance) {
 
 void BeginUrlLoad(
     const std::shared_ptr<WebPlatformViewInstance>& instance,
-    const std::string& url
+    std::string url
 ) {
   instance->html.reset();
   instance->loading = true;
+  const auto document_id = BeginPageMetadata(*instance);
   EmitStateEvent<WebViewEvents::LoadStarted>(instance, true);
   EmitNavigationState(instance, true);
+  if (instance->disposed || instance->metadata_document_id != document_id) return;
   instance->element.call<void>("removeAttribute", std::string("srcdoc"));
   instance->element.set("src", url);
 }
 
 void BeginHtmlLoad(
     const std::shared_ptr<WebPlatformViewInstance>& instance,
-    const WebViewHtml& html
+    WebViewHtml html
 ) {
   instance->html = html;
   instance->loading = true;
+  const auto document_id = BeginPageMetadata(*instance);
   EmitStateEvent<WebViewEvents::LoadStarted>(instance, true);
   EmitNavigationState(instance, true);
+  if (instance->disposed || instance->metadata_document_id != document_id) return;
   instance->element.call<void>("removeAttribute", std::string("src"));
   instance->element.set("srcdoc", HtmlWithBaseUrl(html));
 }
@@ -420,12 +425,18 @@ void DidLoad(std::uint32_t identity) {
     return;
   }
   std::shared_ptr<WebPlatformViewInstance> instance = iterator->second.lock();
-  if (!instance || instance->disposed || !instance->loading) {
+  if (!instance || instance->disposed || instance->metadata_document_id == 0) {
     return;
   }
-  instance->loading = false;
-  EmitStateEvent<WebViewEvents::LoadFinished>(instance, false);
-  EmitNavigationState(instance, false);
+  const bool was_loading = std::exchange(instance->loading, false);
+  const auto document_id = was_loading ? instance->metadata_document_id : BeginPageMetadata(*instance);
+  if (was_loading) {
+    EmitStateEvent<WebViewEvents::LoadFinished>(instance, false);
+    EmitNavigationState(instance, false);
+  }
+  if (instance->metadata_document_id == document_id && instance->properties.java_script_enabled) {
+    RunCommand(instance, ReadPageMetadata(instance, document_id));
+  }
 }
 
 void DidReceiveMessage(std::uint32_t identity, const char* message) {

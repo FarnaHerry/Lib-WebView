@@ -29,7 +29,8 @@ import java.nio.charset.StandardCharsets;
 
 public final class HuxerUIWebView implements HuxerUIPlatformView {
     private static final Set<String> PROPERTY_FIELDS = new LinkedHashSet<>(
-            Arrays.asList("backgroundColor", "domStorageEnabled", "javaScriptEnabled", "themeBrightness", "url", "userAgent")
+            Arrays.asList("backgroundColor", "domStorageEnabled", "javaScriptEnabled", "pageMetadataScript",
+                    "themeBrightness", "url", "userAgent")
     );
     private static final Set<String> COLOR_FIELDS = new LinkedHashSet<>(
             Arrays.asList("alpha", "blue", "green", "red")
@@ -134,6 +135,7 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
         final String themeBrightness;
         final boolean domStorageEnabled;
         final int backgroundColor;
+        final String pageMetadataScript;
 
         Properties(
                 String url,
@@ -141,7 +143,8 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
                 String userAgent,
                 String themeBrightness,
                 boolean domStorageEnabled,
-                int backgroundColor
+                int backgroundColor,
+                String pageMetadataScript
         ) {
             this.url = url;
             this.javaScriptEnabled = javaScriptEnabled;
@@ -149,6 +152,7 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
             this.themeBrightness = themeBrightness;
             this.domStorageEnabled = domStorageEnabled;
             this.backgroundColor = backgroundColor;
+            this.pageMetadataScript = pageMetadataScript;
         }
 
         static Properties decode(PlatformPayload payload) {
@@ -166,12 +170,14 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
                     payload.requireField("userAgent").requireString(),
                     themeBrightnessValue,
                     payload.requireField("domStorageEnabled").requireBoolean(),
-                    decodeColor(payload.requireField("backgroundColor"))
+                    decodeColor(payload.requireField("backgroundColor")),
+                    payload.requireField("pageMetadataScript").requireString()
             );
         }
 
         Properties withUrl(String value) {
-            return new Properties(value, javaScriptEnabled, userAgent, themeBrightness, domStorageEnabled, backgroundColor);
+            return new Properties(value, javaScriptEnabled, userAgent, themeBrightness, domStorageEnabled,
+                    backgroundColor, pageMetadataScript);
         }
 
         private static int decodeColor(PlatformPayload payload) {
@@ -255,6 +261,10 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
     private Properties properties;
     private boolean disposed;
     private boolean loading;
+    private long metadataDocumentId;
+    private String metadataCommittedUrl;
+    private String metadataFinishedUrl;
+    private boolean metadataCollectionStarted;
 
     private HuxerUIWebView(
             Context context,
@@ -342,6 +352,31 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
         fields.put("message", PlatformPayload.string(message == null ? "" : message));
         fields.put("url", url == null ? PlatformPayload.nullValue() : PlatformPayload.string(url));
         events.emit("loadFailed", PlatformPayload.object(fields));
+    }
+
+    private void emitPageMetadata(long documentId, String result) {
+        Map<String, PlatformPayload> fields = new LinkedHashMap<>();
+        fields.put("documentId", PlatformPayload.int64(documentId));
+        fields.put("result", result == null ? PlatformPayload.nullValue() : PlatformPayload.string(result));
+        events.emit("pageMetadataChanged", PlatformPayload.object(fields));
+    }
+
+    private void collectPageMetadata() {
+        if (disposed || metadataDocumentId == 0 || metadataCollectionStarted || !properties.javaScriptEnabled
+                || metadataCommittedUrl == null || !metadataCommittedUrl.equals(metadataFinishedUrl)
+                || !metadataCommittedUrl.equals(webView.getUrl())) {
+            return;
+        }
+        final long documentId = metadataDocumentId;
+        final String url = metadataCommittedUrl;
+        metadataCollectionStarted = true;
+        webView.evaluateJavascript(properties.pageMetadataScript, result -> {
+            if (!disposed && metadataDocumentId == documentId && url.equals(metadataCommittedUrl)
+                    && url.equals(webView.getUrl())
+                    && result != null && !"null".equals(result) && !"\"|\"".equals(result)) {
+                emitPageMetadata(documentId, result);
+            }
+        });
     }
 
     @Override
@@ -534,22 +569,42 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            if (disposed) return;
             properties = properties.withUrl(url == null ? "" : url);
             loading = true;
+            metadataCommittedUrl = null;
+            metadataFinishedUrl = null;
+            metadataCollectionStarted = false;
+            emitPageMetadata(++metadataDocumentId, null);
             emitStateEvent("loadStarted");
             emitNavigationState();
         }
 
         @Override
+        public void onPageCommitVisible(WebView view, String url) {
+            if (!disposed && url != null && url.equals(view.getUrl())) {
+                metadataCommittedUrl = url;
+                collectPageMetadata();
+            }
+        }
+
+        @Override
         public void onPageFinished(WebView view, String url) {
+            if (disposed) return;
+            final long documentId = metadataDocumentId;
             loading = false;
             emitStateEvent("loadFinished");
             emitNavigationState();
+            if (!disposed && metadataDocumentId == documentId && url != null && url.equals(view.getUrl())) {
+                metadataFinishedUrl = url;
+                collectPageMetadata();
+            }
         }
 
         @Override
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (request.isForMainFrame()) {
+                if (request.getUrl().toString().equals(view.getUrl())) metadataCommittedUrl = null;
                 loading = false;
                 emitLoadError(
                         "android/webview/" + error.getErrorCode(),
@@ -574,6 +629,11 @@ public final class HuxerUIWebView implements HuxerUIPlatformView {
 
         @Override
         public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+            if (!disposed) {
+                metadataCommittedUrl = null;
+                metadataFinishedUrl = null;
+                emitPageMetadata(++metadataDocumentId, null);
+            }
             loading = false;
             emitLoadError(
                     "android/webview/render-process-gone",

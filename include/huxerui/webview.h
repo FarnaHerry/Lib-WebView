@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -194,6 +195,24 @@ struct WebViewNavigationState {
   [[nodiscard]] static WebViewNavigationState Decode(const PlatformPayload& payload);
 };
 
+/// Read-only metadata declared by the current top-level document.
+struct WebViewPageMetadata {
+  /// Changes for each main document load within a mounted WebView.
+  std::int64_t document_id = 0;
+
+  /// Resolved page-declared icon URLs in document order. Treat them as untrusted input.
+  std::vector<std::string> icon_urls;
+
+  /// The page's description and first theme color applicable to its current media conditions.
+  std::optional<std::string> description;
+  std::optional<std::string> theme_color;
+
+  bool operator==(const WebViewPageMetadata&) const = default;
+
+  /// Decodes a metadata event from a cross-language PlatformView adapter.
+  [[nodiscard]] static WebViewPageMetadata Decode(const PlatformPayload& payload);
+};
+
 /// Describes a WebView load failure.
 struct WebViewLoadError {
   /// A diagnostic identifier. Platform-prefixed codes must not be used as a
@@ -244,6 +263,12 @@ struct WebViewEvents {
   /// Reports that a top-level load failed.
   struct LoadFailed : Event<void(const WebViewLoadError&)> {
     static constexpr std::string_view Name = "loadFailed";
+  };
+
+  /// Delivers an empty snapshot for a new main document load, then the metadata
+  /// that the backend can read after the load. Unavailable fields stay empty.
+  struct PageMetadataChanged : Event<void(const WebViewPageMetadata&)> {
+    static constexpr std::string_view Name = "pageMetadataChanged";
   };
 
   /// Delivers text posted by page JavaScript through `huxerui.postMessage`.

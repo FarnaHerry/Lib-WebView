@@ -11,6 +11,64 @@ int main() {
     if (!passed) { std::printf("FAIL %s\n", message); ++failures; }
   };
   {
+    using detail::BeginPageMetadata;
+    using detail::ReadPageMetadata;
+    struct MetadataView {
+      PlatformEventEmitter events;
+      std::int64_t metadata_document_id = 0;
+      bool disposed = false;
+    };
+    const auto make_view = [&](std::vector<WebViewPageMetadata>& snapshots) {
+      return std::make_shared<MetadataView>(MetadataView{
+          .events = detail::MakePlatformEventEmitter(
+              [&snapshots, &check](std::type_index event, PlatformValue payload) -> std::optional<PlatformValue> {
+                check(event == typeid(WebViewEvents::PageMetadataChanged), "metadata uses the typed WebView event");
+                snapshots.push_back(payload.Get<WebViewPageMetadata>());
+                return std::nullopt;
+              },
+              {}),
+      });
+    };
+    std::vector<WebViewPageMetadata> first_snapshots, second_snapshots;
+    const auto first = make_view(first_snapshots);
+    const auto second = make_view(second_snapshots);
+    const auto old_document = BeginPageMetadata(*first);
+    const auto old_read = ReadPageMetadata(first, old_document);
+    const auto other_document = BeginPageMetadata(*second);
+    const auto other_read = ReadPageMetadata(second, other_document);
+    const auto new_document = BeginPageMetadata(*first);
+    const auto new_read = ReadPageMetadata(first, new_document);
+    old_read.completion(std::string(R"("old||https%3A%2F%2Fexample.com%2Ficon-old.png")"));
+    check(first_snapshots == std::vector<WebViewPageMetadata>{{.document_id = old_document},
+                                                            {.document_id = new_document}},
+          "new navigation clears metadata and rejects the previous document result");
+    other_read.completion(std::string(R"("other||https%3A%2F%2Fexample.com%2Ficon-other.png")"));
+    check(second_snapshots.size() == 2 && second_snapshots.back().description == "other" && first_snapshots.size() == 2,
+          "another mounted WebView publishes independently even when document IDs match");
+
+    const std::string result =
+        R"("%E7%BD%91%E9%A1%B5%20%7C%20%22hello%22|%23abc|)"
+        R"(https%3A%2F%2Fexample.com%2Ficon.png|https%3A%2F%2Fexample.com%2Ficon.svg")";
+    const WebViewPageMetadata expected{
+        .document_id = new_document,
+        .icon_urls = {"https://example.com/icon.png", "https://example.com/icon.svg"},
+        .description = "\xe7\xbd\x91\xe9\xa1\xb5 | \"hello\"",
+        .theme_color = "#abc",
+    };
+    new_read.completion(result);
+    check(first_snapshots.size() == 3 && first_snapshots.back() == expected, "metadata fields decode in document order");
+    check(WebViewPageMetadata::Decode(PlatformPayload::Object{
+              {"documentId", new_document}, {"result", result},
+          }) == expected, "Android payload decodes to the same metadata snapshot");
+    check(detail::DecodePageMetadata(new_document, R"("%FF|color|icon")") ==
+              WebViewPageMetadata{.document_id = new_document},
+          "malformed metadata is ignored");
+    const auto disposed_read = ReadPageMetadata(first, BeginPageMetadata(*first));
+    first->disposed = true;
+    disposed_read.completion(result);
+    check(first_snapshots.size() == 4, "disposed WebViews drop pending metadata updates");
+  }
+  {
     WebViewController buffered;
     int loads = 0;
     std::string last_url;

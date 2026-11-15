@@ -64,6 +64,8 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   HWND window = nullptr;
   WebViewProperties properties;
   PlatformEventEmitter events;
+  std::int64_t metadata_document_id = 0;
+  std::optional<UINT64> metadata_navigation_id;
   ComPtr<ICoreWebView2Environment> environment;
   ComPtr<ICoreWebView2Controller> controller;
   ComPtr<ICoreWebView2> web_view;
@@ -685,6 +687,12 @@ void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
             }
             current->properties.url = url;
             current->loading = true;
+            UINT64 navigation_id = 0;
+            if (SUCCEEDED(arguments->get_NavigationId(&navigation_id)) &&
+                current->metadata_navigation_id != navigation_id) {
+              current->metadata_navigation_id = navigation_id;
+              BeginPageMetadata(*current);
+            }
             EmitStateEvent<WebViewEvents::LoadStarted>(current);
             EmitNavigationState(current);
             return S_OK;
@@ -713,7 +721,14 @@ void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
               );
             }
             if (successful != FALSE) {
+              UINT64 navigation_id = 0;
+              const auto document_id = current->metadata_document_id;
               EmitStateEvent<WebViewEvents::LoadFinished>(current);
+              if (!current->disposed && current->metadata_document_id == document_id &&
+                  SUCCEEDED(arguments->get_NavigationId(&navigation_id)) &&
+                  current->metadata_navigation_id == navigation_id) {
+                EvaluateJavaScript(current, ReadPageMetadata(current, document_id));
+              }
             }
             EmitNavigationState(current);
             return S_OK;

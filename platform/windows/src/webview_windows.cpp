@@ -86,6 +86,7 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   EventRegistrationToken web_message_received_token{};
   EventRegistrationToken new_window_requested_token{};
   EventRegistrationToken accelerator_key_token{};
+  EventRegistrationToken got_focus_token{};
   // Commands can arrive between the platform view connecting and WebView2 finishing
   // initialization; they are queued instead of being dropped, then drained in order.
   std::vector<WebViewControllerCommand> pending_commands;
@@ -725,6 +726,17 @@ void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
       &instance->new_window_requested_token
   );
 
+  instance->controller->add_GotFocus(
+      Callback<ICoreWebView2FocusChangedEventHandler>(
+          [weak_instance](ICoreWebView2Controller*, IUnknown*) -> HRESULT {
+            const auto current = weak_instance.lock();
+            if (current && !current->disposed) current->events.Emit<WebViewEvents::FocusEntered>();
+            return S_OK;
+          }
+      ).Get(),
+      &instance->got_focus_token
+  );
+
   instance->controller->add_AcceleratorKeyPressed(
       Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
           [weak_instance](ICoreWebView2Controller*, ICoreWebView2AcceleratorKeyPressedEventArgs* arguments) -> HRESULT {
@@ -1083,6 +1095,7 @@ void DisposeWindowsWebView(WindowsWebViewInstance& instance) {
   instance.web_view.Reset();
   instance.environment.Reset();
   if (instance.controller) {
+    instance.controller->remove_GotFocus(instance.got_focus_token);
     instance.controller->remove_AcceleratorKeyPressed(instance.accelerator_key_token);
     instance.controller->Close();
     instance.controller.Reset();

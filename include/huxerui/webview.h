@@ -299,6 +299,11 @@ struct WebViewEvents {
     static constexpr std::string_view Name = "shortcutPressed";
   };
 
+  /// Notifies the host when WebView2 receives native keyboard focus on Windows.
+  struct FocusEntered : Event<void()> {
+    static constexpr std::string_view Name = "focusEntered";
+  };
+
   /// Delivers text posted by page JavaScript through `huxerui.postMessage`.
   ///
   /// Treat every message as untrusted input. Availability depends on page

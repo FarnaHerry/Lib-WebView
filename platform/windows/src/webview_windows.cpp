@@ -733,14 +733,24 @@ void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
             COREWEBVIEW2_KEY_EVENT_KIND kind{};
             COREWEBVIEW2_PHYSICAL_KEY_STATUS status{};
             if (!current || current->disposed ||
-                FAILED(arguments->get_VirtualKey(&key)) || key != VK_F11 ||
-                FAILED(arguments->get_KeyEventKind(&kind)) || kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN ||
-                FAILED(arguments->get_PhysicalKeyStatus(&status)) || status.WasKeyDown || status.IsMenuKeyDown ||
-                (GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_SHIFT) & 0x8000) ||
-                (GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000)) {
+                FAILED(arguments->get_VirtualKey(&key)) || FAILED(arguments->get_KeyEventKind(&kind)) ||
+                (kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN &&
+                 kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN) ||
+                FAILED(arguments->get_PhysicalKeyStatus(&status)) || status.WasKeyDown) {
               return S_OK;
             }
-            if (current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false)) {
+            const KeyModifiers modifiers{
+                .shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+                .control = (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+                .alt = status.IsMenuKeyDown != FALSE || (GetKeyState(VK_MENU) & 0x8000) != 0,
+                .meta = ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) != 0,
+            };
+            const Key shortcut = WebViewShortcutKey(key, VK_F1, modifiers);
+            if (shortcut == Key::Unknown) return S_OK;
+            const KeyEvent event{.key = shortcut, .modifiers = modifiers};
+            if (current->events.Emit<WebViewEvents::ShortcutPressed>(event).value_or(false) ||
+                (shortcut == Key::F11 && modifiers == KeyModifiers{} &&
+                 current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false))) {
               return arguments->put_Handled(TRUE);
             }
             return S_OK;

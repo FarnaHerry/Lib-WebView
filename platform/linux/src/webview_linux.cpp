@@ -28,8 +28,7 @@ struct LinuxWebViewInstance : std::enable_shared_from_this<LinuxWebViewInstance>
   std::int64_t metadata_document_id = 0;
   GtkEventController* fullscreen_key_controller = nullptr;
   GtkEventController* fullscreen_focus_controller = nullptr;
-  std::optional<guint> fullscreen_keycode;
-  bool fullscreen_key_handled = false;
+  std::map<guint, bool> pressed_shortcuts;
   bool loading = false;
   bool load_failed = false;
   bool disposed = false;
@@ -679,27 +678,35 @@ void NavigationPropertyChanged(GObject*, GParamSpec*, gpointer data) {
   }
 }
 
-gboolean FullscreenKeyPressed(GtkEventControllerKey*, guint key, guint code, GdkModifierType state, gpointer data) {
+gboolean ShortcutKeyPressed(GtkEventControllerKey*, guint key, guint code, GdkModifierType state, gpointer data) {
   auto& instance = *static_cast<LinuxWebViewInstance*>(data);
-  constexpr auto modifiers = GDK_SHIFT_MASK | GDK_CONTROL_MASK | GDK_ALT_MASK |
-      GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK;
-  if (instance.disposed || key != GDK_KEY_F11) return FALSE;
-  if (instance.fullscreen_keycode == code) return instance.fullscreen_key_handled;
-
+  if (instance.disposed) return FALSE;
+  if (const auto pressed = instance.pressed_shortcuts.find(code); pressed != instance.pressed_shortcuts.end()) {
+    return pressed->second;
+  }
+  const KeyModifiers modifiers{
+      .shift = (state & GDK_SHIFT_MASK) != 0,
+      .control = (state & GDK_CONTROL_MASK) != 0,
+      .alt = (state & GDK_ALT_MASK) != 0,
+      .meta = (state & (GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK)) != 0,
+  };
+  const Key shortcut = WebViewShortcutKey(key, GDK_KEY_F1, modifiers);
+  if (shortcut == Key::Unknown) return FALSE;
   const auto current = instance.shared_from_this();
-  current->fullscreen_keycode = code;
-  current->fullscreen_key_handled = (state & modifiers) == 0 &&
-      current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false);
-  return current->fullscreen_key_handled;
+  const KeyEvent event{.key = shortcut, .modifiers = modifiers};
+  const bool handled = current->events.Emit<WebViewEvents::ShortcutPressed>(event).value_or(false) ||
+      (shortcut == Key::F11 && modifiers == KeyModifiers{} &&
+       current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false));
+  current->pressed_shortcuts.emplace(code, handled);
+  return handled;
 }
 
-void FullscreenKeyReleased(GtkEventControllerKey*, guint, guint code, GdkModifierType, gpointer data) {
-  auto& instance = *static_cast<LinuxWebViewInstance*>(data);
-  if (instance.fullscreen_keycode == code) instance.fullscreen_keycode.reset();
+void ShortcutKeyReleased(GtkEventControllerKey*, guint, guint code, GdkModifierType, gpointer data) {
+  static_cast<LinuxWebViewInstance*>(data)->pressed_shortcuts.erase(code);
 }
 
-void FullscreenFocusLeft(GtkEventControllerFocus*, gpointer data) {
-  static_cast<LinuxWebViewInstance*>(data)->fullscreen_keycode.reset();
+void ShortcutFocusLeft(GtkEventControllerFocus*, gpointer data) {
+  static_cast<LinuxWebViewInstance*>(data)->pressed_shortcuts.clear();
 }
 
 std::shared_ptr<LinuxWebViewInstance> CreateLinuxWebView(GtkWidget* parent, const WebViewProperties& properties,
@@ -746,12 +753,12 @@ std::shared_ptr<LinuxWebViewInstance> CreateLinuxWebView(GtkWidget* parent, cons
 
   instance->fullscreen_key_controller = gtk_event_controller_key_new();
   gtk_event_controller_set_propagation_phase(instance->fullscreen_key_controller, GTK_PHASE_CAPTURE);
-  g_signal_connect(instance->fullscreen_key_controller, "key-pressed", G_CALLBACK(FullscreenKeyPressed), instance.get());
-  g_signal_connect(instance->fullscreen_key_controller, "key-released", G_CALLBACK(FullscreenKeyReleased), instance.get());
+  g_signal_connect(instance->fullscreen_key_controller, "key-pressed", G_CALLBACK(ShortcutKeyPressed), instance.get());
+  g_signal_connect(instance->fullscreen_key_controller, "key-released", G_CALLBACK(ShortcutKeyReleased), instance.get());
   gtk_widget_add_controller(widget, instance->fullscreen_key_controller);
 
   instance->fullscreen_focus_controller = gtk_event_controller_focus_new();
-  g_signal_connect(instance->fullscreen_focus_controller, "leave", G_CALLBACK(FullscreenFocusLeft), instance.get());
+  g_signal_connect(instance->fullscreen_focus_controller, "leave", G_CALLBACK(ShortcutFocusLeft), instance.get());
   gtk_widget_add_controller(widget, instance->fullscreen_focus_controller);
 
   ApplyProperties(instance, properties, true);

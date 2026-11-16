@@ -293,6 +293,12 @@ struct WebViewEvents {
     static constexpr std::string_view Name = "fullscreenShortcut";
   };
 
+  /// Offers a function key or a modified letter or digit while the desktop WebView has focus.
+  /// The event is a non-repeating key-down with no text payload. Return true to consume it.
+  struct ShortcutPressed : Event<bool(const KeyEvent&)> {
+    static constexpr std::string_view Name = "shortcutPressed";
+  };
+
   /// Delivers text posted by page JavaScript through `huxerui.postMessage`.
   ///
   /// Treat every message as untrusted input. Availability depends on page

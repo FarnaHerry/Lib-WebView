@@ -555,18 +555,29 @@ std::shared_ptr<MacOSWebViewInstance> CreateMacOSWebView(
   std::weak_ptr<MacOSWebViewInstance> weak = instance;
   instance->fullscreen_key_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
       handler:^NSEvent*(NSEvent* event) {
-        constexpr NSEventModifierFlags modifiers = NSEventModifierFlagShift | NSEventModifierFlagControl |
-            NSEventModifierFlagOption | NSEventModifierFlagCommand;
-        if (event.isARepeat || (event.modifierFlags & modifiers) != 0) return event;
+        if (event.isARepeat) return event;
         NSString* characters = event.charactersIgnoringModifiers;
-        if (characters.length != 1 || [characters characterAtIndex:0] != NSF11FunctionKey) return event;
+        if (characters.length != 1) return event;
+        const auto flags = event.modifierFlags;
+        const KeyModifiers modifiers{
+            .shift = (flags & NSEventModifierFlagShift) != 0,
+            .control = (flags & NSEventModifierFlagControl) != 0,
+            .alt = (flags & NSEventModifierFlagOption) != 0,
+            .meta = (flags & NSEventModifierFlagCommand) != 0,
+        };
+        const Key key = WebViewShortcutKey([characters characterAtIndex:0], NSF1FunctionKey, modifiers);
+        if (key == Key::Unknown) return event;
 
         const auto current = weak.lock();
         if (!current || current->disposed || event.window == nil || event.window != current->view.window) return event;
         NSResponder* responder = event.window.firstResponder;
         if (![responder isKindOfClass:[NSView class]] ||
             ![(NSView*)responder isDescendantOf:current->view]) return event;
-        return current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false) ? nil : event;
+        const KeyEvent shortcut{.key = key, .modifiers = modifiers};
+        const bool handled = current->events.Emit<WebViewEvents::ShortcutPressed>(shortcut).value_or(false) ||
+            (key == Key::F11 && modifiers == KeyModifiers{} &&
+             current->events.Emit<WebViewEvents::FullscreenShortcut>().value_or(false));
+        return handled ? nil : event;
       }];
   ApplyProperties(instance, properties, true);
   return instance;

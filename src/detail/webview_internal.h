@@ -11,6 +11,17 @@
 
 namespace huxerui::detail {
 
+inline Key WebViewShortcutKey(unsigned code, unsigned first_function_key, KeyModifiers modifiers) {
+  if (code >= first_function_key && code - first_function_key < 24) {
+    return static_cast<Key>(static_cast<unsigned>(Key::F1) + code - first_function_key);
+  }
+  if (!modifiers.control && !modifiers.alt && !modifiers.meta) return Key::Unknown;
+  if (code >= 'a' && code <= 'z') code -= 'a' - 'A';
+  if (code >= 'A' && code <= 'Z') return static_cast<Key>(static_cast<unsigned>(Key::A) + code - 'A');
+  if (code >= '0' && code <= '9') return static_cast<Key>(static_cast<unsigned>(Key::Digit0) + code - '0');
+  return Key::Unknown;
+}
+
 inline constexpr char web_view_type[] = "huxerui/webview";
 
 enum class WebViewCommand {

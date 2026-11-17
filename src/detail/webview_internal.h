@@ -114,9 +114,11 @@ using WebViewControllerCommand = std::variant<
 >;
 
 using WebViewCommandHandler = std::function<bool(WebViewControllerCommand)>;
+using WebViewMemoryUsageHandler = std::function<bool(WebViewMemoryUsageTarget)>;
 
 struct WebViewControllerAccess {
-  static void Connect(const WebViewController& controller, WebViewCommandHandler handler);
+  static void Connect(const WebViewController& controller, WebViewCommandHandler handler,
+                      WebViewMemoryUsageHandler memory_usage_handler = {});
   static void Disconnect(const WebViewController& controller);
 };
 

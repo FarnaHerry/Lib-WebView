@@ -85,6 +85,29 @@ int main() {
     check(loads == 1 && last_url == "https://example.com/two", "last buffered load replays on connect");
     check(buffered.IsConnected(), "buffered controller is connected");
   }
+  {
+    using Target = WebViewMemoryUsageTarget;
+    WebViewController retained;
+    std::vector<Target> updates;
+    const auto ignore_command = [](detail::WebViewControllerCommand) { return false; };
+    const auto update_target = [&](Target target) {
+      updates.push_back(target);
+      return true;
+    };
+    check(!retained.SetMemoryUsageTarget(Target::Normal) && !retained.SetMemoryUsageTarget(Target::Low),
+          "unmounted memory targets report not accepted");
+    detail::WebViewControllerAccess::Connect(retained, ignore_command, update_target);
+    check(updates == std::vector{Target::Low}, "the latest memory target survives mounting");
+    check(retained.SetMemoryUsageTarget(Target::Normal), "a mounted view accepts a memory target");
+    detail::WebViewControllerAccess::Disconnect(retained);
+    check(!retained.SetMemoryUsageTarget(Target::Low), "a disconnected view stops receiving updates");
+    detail::WebViewControllerAccess::Connect(retained, ignore_command);
+    check(!retained.SetMemoryUsageTarget(Target::Normal) && updates == std::vector{Target::Low, Target::Normal},
+          "a backend without target support leaves its underlying view alone");
+    detail::WebViewControllerAccess::Connect(retained, ignore_command, update_target);
+    check(updates == std::vector{Target::Low, Target::Normal, Target::Normal},
+          "the latest target replays when a compatible view reconnects");
+  }
 
   const PlatformPayload system_theme = WebViewProperties::Encode({});
   check(system_theme.AsObject().at("themeBrightness").IsNull(), "system theme encodes as null");

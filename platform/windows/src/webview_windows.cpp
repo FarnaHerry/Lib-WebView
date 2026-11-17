@@ -87,6 +87,7 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
   EventRegistrationToken new_window_requested_token{};
   EventRegistrationToken accelerator_key_token{};
   EventRegistrationToken got_focus_token{};
+  WebViewMemoryUsageTarget memory_usage_target = WebViewMemoryUsageTarget::Normal;
   // Commands can arrive between the platform view connecting and WebView2 finishing
   // initialization; they are queued instead of being dropped, then drained in order.
   std::vector<WebViewControllerCommand> pending_commands;
@@ -140,6 +141,36 @@ struct WindowsWebViewInstance : std::enable_shared_from_this<WindowsWebViewInsta
     return DefWindowProcW(window, message, word, data);
   }
 };
+
+struct SharedWindowsWebViewEnvironment {
+  ComPtr<ICoreWebView2Environment> value;
+  std::optional<EventRegistrationToken> browser_process_exited_token;
+  std::vector<std::weak_ptr<WindowsWebViewInstance>> waiting;
+
+  ~SharedWindowsWebViewEnvironment() { Reset(); }
+
+  void Reset() {
+    if (browser_process_exited_token) {
+      ComPtr<ICoreWebView2Environment5> events;
+      if (SUCCEEDED(value.As(&events))) {
+        events->remove_BrowserProcessExited(*browser_process_exited_token);
+      }
+      browser_process_exited_token.reset();
+    }
+    value.Reset();
+  }
+};
+
+bool SetWindowsMemoryUsageTarget(WindowsWebViewInstance& instance, WebViewMemoryUsageTarget target) {
+  instance.memory_usage_target = target;
+  if (!instance.web_view) return true;
+  ComPtr<ICoreWebView2_19> web_view;
+  if (FAILED(instance.web_view.As(&web_view))) return false;
+  return SUCCEEDED(web_view->put_MemoryUsageTargetLevel(
+      target == WebViewMemoryUsageTarget::Low ? COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+                                            : COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+  ));
+}
 
 void EnsureWindowClass() {
   static std::once_flag once;
@@ -894,8 +925,85 @@ void AttachEvents(const std::shared_ptr<WindowsWebViewInstance>& instance) {
 
 void DrainPendingCommands(const std::weak_ptr<WindowsWebViewInstance>& instance);
 
-void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) {
-  std::weak_ptr<WindowsWebViewInstance> weak_instance = instance;
+void FailWebViewInitialization(
+    const std::shared_ptr<WindowsWebViewInstance>& instance,
+    const char* code,
+    const char* message
+) {
+  instance->pending_commands.clear();
+  EmitLoadError(instance, code, message);
+}
+
+void CreateWebViewController(
+    const std::shared_ptr<WindowsWebViewInstance>& instance,
+    ComPtr<ICoreWebView2Environment> environment,
+    const std::shared_ptr<SharedWindowsWebViewEnvironment>& shared
+) {
+  instance->environment = environment;
+  const auto controller_failed = [cache = std::weak_ptr(shared)](const auto& current) {
+    if (const auto cached = cache.lock(); cached && cached->value.Get() == current->environment.Get()) {
+      cached->Reset();
+    }
+    FailWebViewInitialization(current, "windows/webview2/controller", "Could not create the WebView2 controller");
+  };
+  const HRESULT started = environment->CreateCoreWebView2Controller(
+      instance->window,
+      Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+          [weak_instance = std::weak_ptr(instance), controller_failed](
+              HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+            const auto current = weak_instance.lock();
+            if (!current || current->disposed) {
+              if (controller != nullptr) controller->Close();
+              return S_OK;
+            }
+            if (FAILED(result) || controller == nullptr) {
+              controller_failed(current);
+              return S_OK;
+            }
+            current->controller = controller;
+            controller->get_CoreWebView2(&current->web_view);
+            if (!current->web_view) {
+              FailWebViewInitialization(current, "windows/webview2/view", "Could not create the WebView2 view");
+              return S_OK;
+            }
+            ComPtr<ICoreWebView2Controller2> controller2;
+            if (SUCCEEDED(current->controller.As(&controller2))) {
+              COREWEBVIEW2_COLOR default_color{};
+              if (SUCCEEDED(controller2->get_DefaultBackgroundColor(&default_color))) {
+                current->default_background_color = default_color;
+              }
+              if (current->properties.background_color.alpha > 0.0F) {
+                current->UpdateBackgroundColor(controller2.Get());
+              }
+            }
+            if (current->memory_usage_target != WebViewMemoryUsageTarget::Normal) {
+              SetWindowsMemoryUsageTarget(*current, current->memory_usage_target);
+            }
+            current->UpdateBounds();
+            AttachEvents(current);
+            const WebViewProperties properties = current->properties;
+            current->properties.url.clear();
+            ApplyProperties(current, properties);
+            DrainPendingCommands(weak_instance);
+            return S_OK;
+          }
+      ).Get()
+  );
+  if (FAILED(started)) controller_failed(instance);
+}
+
+void InitializeWebView(
+    const std::shared_ptr<WindowsWebViewInstance>& instance,
+    const std::shared_ptr<SharedWindowsWebViewEnvironment>& shared
+) {
+  if (shared->value) {
+    CreateWebViewController(instance, shared->value, shared);
+    return;
+  }
+
+  shared->waiting.emplace_back(instance);
+  if (shared->waiting.size() > 1) return;
+
   const std::wstring user_data_folder = DefaultUserDataFolder();
   if (!user_data_folder.empty()) {
     SHCreateDirectoryExW(nullptr, user_data_folder.c_str(), nullptr);
@@ -905,84 +1013,62 @@ void InitializeWebView(const std::shared_ptr<WindowsWebViewInstance>& instance) 
       user_data_folder.empty() ? nullptr : user_data_folder.c_str(),
       nullptr,
       Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-          [weak_instance](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
-            std::shared_ptr<WindowsWebViewInstance> current = weak_instance.lock();
-            if (!current || current->disposed) {
-              return S_OK;
-            }
+          [weak = std::weak_ptr(shared)](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
+            const auto cache = weak.lock();
+            if (!cache) return S_OK;
+            auto waiting = std::exchange(cache->waiting, {});
             if (FAILED(result) || environment == nullptr) {
-              current->pending_commands.clear();
-              EmitLoadError(
-                  current,
-                  "windows/webview2/environment",
-                  "Could not create the WebView2 environment"
-              );
+              for (const auto& entry : waiting) {
+                if (const auto current = entry.lock(); current && !current->disposed) {
+                  FailWebViewInitialization(current, "windows/webview2/environment",
+                                            "Could not create the WebView2 environment");
+                }
+              }
               return S_OK;
             }
-            current->environment = environment;
-            return environment->CreateCoreWebView2Controller(
-                current->window,
-                Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                    [weak_instance](HRESULT controller_result, ICoreWebView2Controller* controller) -> HRESULT {
-                      std::shared_ptr<WindowsWebViewInstance> value = weak_instance.lock();
-                      if (!value || value->disposed) {
-                        if (controller != nullptr) {
-                          controller->Close();
+
+            const ComPtr<ICoreWebView2Environment> created{environment};
+            cache->value = created;
+            ComPtr<ICoreWebView2Environment5> events;
+            EventRegistrationToken token{};
+            if (SUCCEEDED(created.As(&events)) &&
+                SUCCEEDED(events->add_BrowserProcessExited(
+                    Callback<ICoreWebView2BrowserProcessExitedEventHandler>(
+                        [weak, environment](ICoreWebView2Environment*, ICoreWebView2BrowserProcessExitedEventArgs*)
+                            -> HRESULT {
+                          if (const auto current = weak.lock(); current && current->value.Get() == environment) {
+                            current->Reset();
+                          }
+                          return S_OK;
                         }
-                        return S_OK;
-                      }
-                      if (FAILED(controller_result) || controller == nullptr) {
-                        value->pending_commands.clear();
-                        EmitLoadError(
-                            value,
-                            "windows/webview2/controller",
-                            "Could not create the WebView2 controller"
-                        );
-                        return S_OK;
-                      }
-                      value->controller = controller;
-                      controller->get_CoreWebView2(&value->web_view);
-                      if (!value->web_view) {
-                        value->pending_commands.clear();
-                        EmitLoadError(
-                            value,
-                            "windows/webview2/view",
-                            "Could not create the WebView2 view"
-                        );
-                        return S_OK;
-                      }
-                      ComPtr<ICoreWebView2Controller2> controller2;
-                      if (SUCCEEDED(value->controller.As(&controller2))) {
-                        COREWEBVIEW2_COLOR default_color{};
-                        if (SUCCEEDED(controller2->get_DefaultBackgroundColor(&default_color))) {
-                          value->default_background_color = default_color;
-                        }
-                        if (value->properties.background_color.alpha > 0.0F) {
-                          value->UpdateBackgroundColor(controller2.Get());
-                        }
-                      }
-                      value->UpdateBounds();
-                      AttachEvents(value);
-                      const WebViewProperties properties = value->properties;
-                      value->properties.url.clear();
-                      ApplyProperties(value, properties);
-                      DrainPendingCommands(weak_instance);
-                      return S_OK;
-                    })
-                    .Get()
-            );
-          })
-          .Get()
+                    ).Get(),
+                    &token
+                ))) {
+              cache->browser_process_exited_token = token;
+            }
+            for (const auto& entry : waiting) {
+              if (const auto current = entry.lock(); current && !current->disposed) {
+                CreateWebViewController(current, created, cache);
+              }
+            }
+            return S_OK;
+          }
+      ).Get()
   );
   if (FAILED(started)) {
-    EmitLoadError(instance, "windows/webview2/runtime", "Could not start the WebView2 Runtime");
+    for (const auto& entry : std::exchange(shared->waiting, {})) {
+      if (const auto current = entry.lock(); current && !current->disposed) {
+        FailWebViewInitialization(current, "windows/webview2/runtime", "Could not start the WebView2 Runtime");
+      }
+    }
   }
 }
 
 std::shared_ptr<WindowsWebViewInstance> CreateWindowsWebView(
     HWND parent,
     const WebViewProperties& properties,
-    PlatformEventEmitter events
+    PlatformEventEmitter events,
+    const std::shared_ptr<SharedWindowsWebViewEnvironment>& environment
 ) {
   EnsureWindowClass();
   auto instance = std::make_shared<WindowsWebViewInstance>();
@@ -1005,7 +1091,7 @@ std::shared_ptr<WindowsWebViewInstance> CreateWindowsWebView(
   if (instance->window == nullptr) {
     throw std::runtime_error("Could not create the WebView host window");
   }
-  InitializeWebView(instance);
+  InitializeWebView(instance, environment);
   return instance;
 }
 
@@ -1109,8 +1195,12 @@ void DisposeWindowsWebView(WindowsWebViewInstance& instance) {
 } // namespace
 
 void InstallPlatformWebView(ApplicationContext& root) {
+  // The factory is application-owned and all calls are on its UI thread.
   windows::PlatformViewFactory<WebViewProperties, WindowsWebViewInstance, WebViewController> factory{
-      .create = CreateWindowsWebView,
+      .create = [environment = std::make_shared<SharedWindowsWebViewEnvironment>()](
+          HWND parent, const WebViewProperties& properties, PlatformEventEmitter events) {
+        return CreateWindowsWebView(parent, properties, std::move(events), environment);
+      },
       .view = [](const std::shared_ptr<WindowsWebViewInstance>& instance) {
         return instance->window;
       },
@@ -1124,6 +1214,10 @@ void InstallPlatformWebView(ApplicationContext& root) {
             controller,
             [weak_instance](WebViewControllerCommand command) {
               return RunCommand(weak_instance, std::move(command));
+            },
+            [weak_instance](WebViewMemoryUsageTarget target) {
+              const auto current = weak_instance.lock();
+              return current && !current->disposed && SetWindowsMemoryUsageTarget(*current, target);
             }
         );
       },

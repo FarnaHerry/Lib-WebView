@@ -331,6 +331,12 @@ struct WebViewControllerAccess;
 
 } // namespace detail
 
+/// A best-effort memory target that allows the page to continue running.
+enum class WebViewMemoryUsageTarget {
+  Normal,
+  Low,
+};
+
 /// An imperative command handle for one mounted WebView.
 ///
 /// Create and retain this value with `UseWebViewController`:
@@ -363,6 +369,10 @@ public:
 
   /// Navigates to the next entry when WebView history allows it.
   bool GoForward() const;
+
+  /// Requests a memory target on Windows. Other platforms and older WebView2 runtimes may ignore it.
+  /// The latest target is retained across connections. Returns whether a live backend accepted the request.
+  bool SetMemoryUsageTarget(WebViewMemoryUsageTarget target) const;
 
   /// Loads a URL using a GET request without custom headers or a body.
   ///

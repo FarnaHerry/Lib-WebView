@@ -13,6 +13,8 @@ namespace huxerui::detail {
 class WebViewControllerState {
 public:
   WebViewCommandHandler handler;
+  WebViewMemoryUsageHandler memory_usage_handler;
+  std::optional<WebViewMemoryUsageTarget> memory_usage_target;
 
   // Load commands issued before a WebView connects are retained here and
   // replayed on connect: loading is final-state semantics (the last load
@@ -25,9 +27,14 @@ public:
 
 void WebViewControllerAccess::Connect(
     const WebViewController& controller,
-    WebViewCommandHandler handler
+    WebViewCommandHandler handler,
+    WebViewMemoryUsageHandler memory_usage_handler
 ) {
   controller.state_->handler = std::move(handler);
+  controller.state_->memory_usage_handler = std::move(memory_usage_handler);
+  if (controller.state_->memory_usage_handler && controller.state_->memory_usage_target.has_value()) {
+    controller.state_->memory_usage_handler(*controller.state_->memory_usage_target);
+  }
   if (controller.state_->pending_load) {
     auto replay = std::move(*controller.state_->pending_load);
     controller.state_->pending_load.reset();
@@ -37,6 +44,7 @@ void WebViewControllerAccess::Connect(
 
 void WebViewControllerAccess::Disconnect(const WebViewController& controller) {
   controller.state_->handler = {};
+  controller.state_->memory_usage_handler = {};
 }
 
 } // namespace huxerui::detail
@@ -97,6 +105,12 @@ bool WebViewController::GoBack() const {
 
 bool WebViewController::GoForward() const {
   return RunCommand(state_, detail::WebViewCommand::GoForward);
+}
+
+bool WebViewController::SetMemoryUsageTarget(WebViewMemoryUsageTarget target) const {
+  if (!state_) return false;
+  state_->memory_usage_target = target;
+  return state_->memory_usage_handler && state_->memory_usage_handler(target);
 }
 
 bool WebViewController::LoadUrl(std::string url) const {

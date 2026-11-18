@@ -92,18 +92,26 @@ target_include_directories(webview PRIVATE
 _huxerui_select_framework_target(webview_framework_target)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(webview_linux_platform_view_found FALSE)
     get_target_property(webview_sdk_include_dirs ${webview_framework_target} INTERFACE_INCLUDE_DIRECTORIES)
     foreach (webview_sdk_include_dir IN LISTS webview_sdk_include_dirs)
         string(REGEX REPLACE "^\\$<BUILD_INTERFACE:(.*)>$" "\\1"
                 webview_sdk_include_dir "${webview_sdk_include_dir}")
         if (EXISTS "${webview_sdk_include_dir}/huxerui/linux/platform_registry.h")
+            set(webview_linux_platform_view_found TRUE)
             target_sources(webview PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/webview_linux.cpp")
-            target_compile_definitions(webview PRIVATE HUXERUI_WEBVIEW_HAS_LINUX_PLATFORM_VIEW)
             include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/WebKitGTK.cmake")
             huxerui_link_webkitgtk(webview)
             break()
         endif ()
     endforeach ()
+    if (NOT webview_linux_platform_view_found)
+        target_sources(webview PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/webview_linux_unavailable.cpp")
+        message(STATUS
+                "HuxerUI WebView Linux backend disabled: the HuxerUI SDK does not provide the GTK4 PlatformView "
+                "host (huxerui/linux/platform_registry.h)"
+        )
+    endif ()
 endif ()
 
 if (APPLE)

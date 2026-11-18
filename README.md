@@ -1,17 +1,19 @@
 # HuxerUI WebView
 
 This downstream fork maintains application fixes on `farna/main`, including per-view user-agent overrides, retained
-load commands before connection, and a writable per-user WebView2 data folder on Windows. The official baseline is
-tracked through `upstream/main` from `HuxerUI/Lib-WebView`. Consumers should pin a validated commit and use matching
-C++ and Android Java revisions.
+load commands before connection, a writable per-user WebView2 data folder on Windows, and a WebKitGTK Linux backend.
+The official baseline is tracked through `upstream/main` from `HuxerUI/Lib-WebView`. Consumers should pin a validated
+commit and use matching C++ and Android Java revisions.
 
 HuxerUI WebView is a portable embedded web-content component for HuxerUI applications. It provides a common C++ API
 for navigation, custom requests, HTML content, JavaScript evaluation, page-to-application messaging, and observable
 browser state.
 
 The library uses the platform web engine and integrates it as a HuxerUI `PlatformView` on Android, iOS,
-macOS, Windows, Web, and Linux with the HuxerUI fork's GTK4 `PlatformView` host.
-On Linux with an SDK that lacks this host, `InstallWebView` throws `std::logic_error`.
+macOS, Windows, Web, and Linux with the HuxerUI fork's GTK4 `PlatformView` host. The Linux backend uses WebKitGTK
+6.0 (2.40 or later) and requires a HuxerUI SDK build that provides `huxerui/linux/platform_registry.h`; current
+upstream HuxerUI 0.4.0 does not. On Linux with an SDK that lacks this host, `InstallWebView` throws
+`std::logic_error`.
 
 ## Preview
 

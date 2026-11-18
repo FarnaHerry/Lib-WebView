@@ -2,13 +2,20 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
+#include <concepts>
+#include <cstdlib>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
-// GNU language modes can predefine linux, which is a namespace in the SDK.
+// GNU language dialects predefine the macro `linux`, which collides with the
+// SDK's `huxerui::linux` namespace. This backend is the only inclusion point
+// for that header, so dropping the macro here is contained.
 #ifdef linux
 #undef linux
 #endif
@@ -22,6 +29,12 @@ namespace huxerui::detail {
 namespace {
 
 struct LinuxWebViewInstance : std::enable_shared_from_this<LinuxWebViewInstance> {
+  ~LinuxWebViewInstance() {
+    if (web_view != nullptr) {
+      g_object_unref(web_view);
+    }
+  }
+
   WebKitWebView* web_view = nullptr;
   WebViewProperties properties;
   PlatformEventEmitter events;
@@ -42,9 +55,10 @@ std::string CurrentUrl(const LinuxWebViewInstance& instance) {
 WebViewNavigationState NavigationState(const LinuxWebViewInstance& instance) {
   WebKitWebView* view = instance.web_view;
   const double progress = view != nullptr ? webkit_web_view_get_estimated_load_progress(view) : 0.0;
+  const char* title = view != nullptr ? webkit_web_view_get_title(view) : nullptr;
   return {
       .url = CurrentUrl(instance),
-      .title = view != nullptr && webkit_web_view_get_title(view) != nullptr ? webkit_web_view_get_title(view) : "",
+      .title = title != nullptr ? title : "",
       .is_loading = instance.loading,
       .progress = std::clamp(progress, 0.0, 1.0),
       .can_go_back = view != nullptr && webkit_web_view_can_go_back(view),
@@ -177,6 +191,11 @@ bool ValidCookieUri(const std::string& value) {
   return valid;
 }
 
+WebKitCookieManager* CookieManagerOf(const std::shared_ptr<LinuxWebViewInstance>& instance) {
+  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
+  return session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
+}
+
 void CookiesReady(GObject* source, GAsyncResult* result, gpointer data) {
   std::unique_ptr<CookieOperation> operation(static_cast<CookieOperation*>(data));
   GError* error = nullptr;
@@ -214,22 +233,29 @@ struct CookieDeleteItem {
   SoupCookie* cookie = nullptr;
 };
 
-void CookieDeleted(GObject* source, GAsyncResult* result, gpointer data) {
-  std::unique_ptr<CookieDeleteItem> item(static_cast<CookieDeleteItem*>(data));
+template <class Batch>
+void DeletionFinished(GObject* source, GAsyncResult* result, std::shared_ptr<Batch> batch, SoupCookie* cookie,
+                      const char* error_code, const char* failure_message) {
   GError* error = nullptr;
   const gboolean deleted = webkit_cookie_manager_delete_cookie_finish(WEBKIT_COOKIE_MANAGER(source), result, &error);
-  item->batch->failed = item->batch->failed || deleted == FALSE || error != nullptr;
+  batch->failed = batch->failed || deleted == FALSE || error != nullptr;
   if (error != nullptr) {
     g_error_free(error);
   }
-  soup_cookie_free(item->cookie);
-  if (--item->batch->pending == 0) {
-    if (item->batch->failed) {
-      item->batch->completion(PlatformError{"webview/cookies-clear", "Could not clear every WebKitGTK cookie", {}});
+  soup_cookie_free(cookie);
+  if (--batch->pending == 0) {
+    if (batch->failed) {
+      batch->completion(PlatformError{error_code, failure_message, {}});
     } else {
-      item->batch->completion(std::string{});
+      batch->completion(std::string{});
     }
   }
+}
+
+void CookieDeleted(GObject* source, GAsyncResult* result, gpointer data) {
+  std::unique_ptr<CookieDeleteItem> item(static_cast<CookieDeleteItem*>(data));
+  DeletionFinished(source, result, std::move(item->batch), item->cookie, "webview/cookies-clear",
+                   "Could not clear every WebKitGTK cookie");
 }
 
 void CookiesListedForClear(GObject* source, GAsyncResult* result, gpointer data) {
@@ -245,6 +271,7 @@ void CookiesListedForClear(GObject* source, GAsyncResult* result, gpointer data)
   }
   batch->pending = static_cast<std::size_t>(g_list_length(cookies));
   if (batch->pending == 0) {
+    g_list_free_full(cookies, reinterpret_cast<GDestroyNotify>(soup_cookie_free));
     batch->completion(std::string{});
     return;
   }
@@ -260,14 +287,13 @@ void GetCookiesCommand(const std::shared_ptr<LinuxWebViewInstance>& instance, We
     command.completion(PlatformError{"webview/disconnected", "The WebView is disconnected", {}});
     return;
   }
-  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
-  WebKitCookieManager* manager = session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
-  if (manager == nullptr) {
-    command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
-    return;
-  }
   if (!ValidCookieUri(command.url)) {
     command.completion(PlatformError{"webview/invalid-url", "Cookie URL must be an absolute HTTP or HTTPS URL", {}});
+    return;
+  }
+  WebKitCookieManager* manager = CookieManagerOf(instance);
+  if (manager == nullptr) {
+    command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
     return;
   }
   auto* operation = new CookieOperation(manager, std::move(command.completion));
@@ -279,8 +305,7 @@ void ClearCookiesCommand(const std::shared_ptr<LinuxWebViewInstance>& instance, 
     command.completion(PlatformError{"webview/disconnected", "The WebView is disconnected", {}});
     return;
   }
-  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
-  WebKitCookieManager* manager = session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
+  WebKitCookieManager* manager = CookieManagerOf(instance);
   if (manager == nullptr) {
     command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
     return;
@@ -300,11 +325,13 @@ struct CookieListOperation {
 };
 
 WebViewCookie CookieFromSoup(SoupCookie* cookie) {
+  const char* domain = soup_cookie_get_domain(cookie);
+  const char* path = soup_cookie_get_path(cookie);
   WebViewCookie result{
       .name = soup_cookie_get_name(cookie),
       .value = soup_cookie_get_value(cookie),
-      .domain = soup_cookie_get_domain(cookie),
-      .path = soup_cookie_get_path(cookie),
+      .domain = domain != nullptr ? domain : "",
+      .path = path != nullptr ? path : "",
       .secure = soup_cookie_get_secure(cookie) != FALSE,
       .http_only = soup_cookie_get_http_only(cookie) != FALSE,
   };
@@ -365,8 +392,7 @@ void SetCookieCommand(const std::shared_ptr<LinuxWebViewInstance>& instance, Web
     command.completion(PlatformError{"webview/invalid-url", "Cookie URL must be an absolute HTTP or HTTPS URL", {}});
     return;
   }
-  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
-  WebKitCookieManager* manager = session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
+  WebKitCookieManager* manager = CookieManagerOf(instance);
   if (manager == nullptr) {
     command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
     return;
@@ -439,18 +465,8 @@ struct CookieDeleteExactItem {
 
 void CookieExactDeleted(GObject* source, GAsyncResult* result, gpointer data) {
   std::unique_ptr<CookieDeleteExactItem> item(static_cast<CookieDeleteExactItem*>(data));
-  GError* error = nullptr;
-  const gboolean deleted = webkit_cookie_manager_delete_cookie_finish(WEBKIT_COOKIE_MANAGER(source), result, &error);
-  item->batch->failed = item->batch->failed || deleted == FALSE || error != nullptr;
-  if (error != nullptr) g_error_free(error);
-  soup_cookie_free(item->cookie);
-  if (--item->batch->pending == 0) {
-    if (item->batch->failed) {
-      item->batch->completion(PlatformError{"webview/cookies", "Could not delete every matching WebKitGTK cookie", {}});
-    } else {
-      item->batch->completion(std::string{});
-    }
-  }
+  DeletionFinished(source, result, std::move(item->batch), item->cookie, "webview/cookies",
+                   "Could not delete every matching WebKitGTK cookie");
 }
 
 void CookiesListedForExactDelete(GObject* source, GAsyncResult* result, gpointer data) {
@@ -486,8 +502,7 @@ void DeleteCookieCommand(const std::shared_ptr<LinuxWebViewInstance>& instance,
     command.completion(PlatformError{"webview/invalid-url", "Cookie URL must be an absolute HTTP or HTTPS URL", {}});
     return;
   }
-  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
-  WebKitCookieManager* manager = session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
+  WebKitCookieManager* manager = CookieManagerOf(instance);
   if (manager == nullptr) {
     command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
     return;
@@ -508,8 +523,7 @@ void GetCookieListCommand(const std::shared_ptr<LinuxWebViewInstance>& instance,
     command.completion(PlatformError{"webview/invalid-url", "Cookie URL must be an absolute HTTP or HTTPS URL", {}});
     return;
   }
-  WebKitNetworkSession* session = webkit_web_view_get_network_session(instance->web_view);
-  WebKitCookieManager* manager = session != nullptr ? webkit_network_session_get_cookie_manager(session) : nullptr;
+  WebKitCookieManager* manager = CookieManagerOf(instance);
   if (manager == nullptr) {
     command.completion(PlatformError{"webview/cookies", "The WebKitGTK cookie store is unavailable", {}});
     return;
@@ -522,11 +536,14 @@ void GetCookieListCommand(const std::shared_ptr<LinuxWebViewInstance>& instance,
 void ApplyProperties(const std::shared_ptr<LinuxWebViewInstance>& instance, const WebViewProperties& properties,
                      bool initial) {
   const bool url_changed = initial || instance->properties.url != properties.url;
+  const bool user_agent_changed = initial || instance->properties.user_agent != properties.user_agent;
   instance->properties = properties;
-  webkit_settings_set_enable_javascript(webkit_web_view_get_settings(instance->web_view),
-                                        properties.java_script_enabled);
-  webkit_settings_set_user_agent(webkit_web_view_get_settings(instance->web_view),
-      properties.user_agent.empty() ? nullptr : properties.user_agent.c_str());
+  WebKitSettings* settings = webkit_web_view_get_settings(instance->web_view);
+  webkit_settings_set_enable_javascript(settings, properties.java_script_enabled);
+  if (user_agent_changed) {
+    // A null or empty user agent restores the WebKitGTK default.
+    webkit_settings_set_user_agent(settings, properties.user_agent.empty() ? nullptr : properties.user_agent.c_str());
+  }
   if (url_changed) {
     LoadUrl(instance, properties.url);
   }
@@ -554,6 +571,7 @@ bool RunCommand(const std::weak_ptr<LinuxWebViewInstance>& weak_instance, WebVie
       webkit_web_view_go_forward(instance->web_view);
       return true;
     }
+    return false;
   }
   if (const auto* value = std::get_if<WebViewLoadRequestCommand>(&command)) {
     LoadRequest(instance, value->request);
@@ -561,6 +579,10 @@ bool RunCommand(const std::weak_ptr<LinuxWebViewInstance>& weak_instance, WebVie
   }
   if (const auto* value = std::get_if<WebViewLoadHtmlCommand>(&command)) {
     LoadHtml(instance, value->html);
+    return true;
+  }
+  if (auto* value = std::get_if<WebViewEvaluateJavaScriptCommand>(&command)) {
+    EvaluateJavaScript(instance, std::move(*value));
     return true;
   }
   if (auto* value = std::get_if<WebViewGetCookiesCommand>(&command)) {
@@ -583,8 +605,7 @@ bool RunCommand(const std::weak_ptr<LinuxWebViewInstance>& weak_instance, WebVie
     GetCookieListCommand(instance, std::move(*value));
     return true;
   }
-  EvaluateJavaScript(instance, std::get<WebViewEvaluateJavaScriptCommand>(std::move(command)));
-  return true;
+  return false;
 }
 
 void MessageReceived(WebKitUserContentManager*, JSCValue* value, gpointer data) {
@@ -709,26 +730,21 @@ void ShortcutFocusLeft(GtkEventControllerFocus*, gpointer data) {
   static_cast<LinuxWebViewInstance*>(data)->pressed_shortcuts.clear();
 }
 
-std::shared_ptr<LinuxWebViewInstance> CreateLinuxWebView(GtkWidget* parent, const WebViewProperties& properties,
+std::shared_ptr<LinuxWebViewInstance> CreateLinuxWebView(const WebViewProperties& properties,
                                                          PlatformEventEmitter events) {
-  if (parent == nullptr || !GTK_IS_FIXED(parent)) {
-    throw std::invalid_argument("HuxerUI WebView requires a GTK4 clipping container");
-  }
   auto instance = std::make_shared<LinuxWebViewInstance>();
   instance->events = std::move(events);
   GtkWidget* widget = webkit_web_view_new();
   if (widget == nullptr) {
     throw std::runtime_error("WebKitGTK could not create a WebView widget");
   }
-  instance->web_view = WEBKIT_WEB_VIEW(widget);
-  // GTK4 的 widget 默认 visible=FALSE：PlatformView 宿主只 show 顶层容器，
-  // WebView widget 本体必须显式 show，否则不进入映射状态、WebKit 不渲染
-  // 任何帧（快照链输出空白，预览区全透明）。
+  instance->web_view = WEBKIT_WEB_VIEW(g_object_ref_sink(widget));
+  // Ensure the widget stays visible even when hosted in a container that only
+  // shows its own top-level widget; otherwise GTK never maps it and WebKit paints nothing.
   gtk_widget_set_visible(widget, TRUE);
   gtk_widget_set_focusable(widget, TRUE);
   gtk_widget_set_hexpand(widget, TRUE);
   gtk_widget_set_vexpand(widget, TRUE);
-  gtk_fixed_put(GTK_FIXED(parent), widget, 0.0, 0.0);
 
   WebKitUserContentManager* manager = webkit_web_view_get_user_content_manager(instance->web_view);
   g_signal_connect(manager, "script-message-received::huxerui", G_CALLBACK(MessageReceived), instance.get());
@@ -771,28 +787,43 @@ void DisposeLinuxWebView(LinuxWebViewInstance& instance) {
     return;
   }
   GtkWidget* widget = GTK_WIDGET(instance.web_view);
-  gtk_widget_remove_controller(widget, instance.fullscreen_key_controller);
-  gtk_widget_remove_controller(widget, instance.fullscreen_focus_controller);
+  if (instance.fullscreen_key_controller != nullptr) {
+    gtk_widget_remove_controller(widget, instance.fullscreen_key_controller);
+    instance.fullscreen_key_controller = nullptr;
+  }
+  if (instance.fullscreen_focus_controller != nullptr) {
+    gtk_widget_remove_controller(widget, instance.fullscreen_focus_controller);
+    instance.fullscreen_focus_controller = nullptr;
+  }
   webkit_web_view_stop_loading(instance.web_view);
   WebKitUserContentManager* manager = webkit_web_view_get_user_content_manager(instance.web_view);
   g_signal_handlers_disconnect_by_data(manager, &instance);
   webkit_user_content_manager_unregister_script_message_handler(manager, "huxerui", nullptr);
   g_signal_handlers_disconnect_by_data(instance.web_view, &instance);
-  instance.web_view = nullptr;
 }
 
 } // namespace
 
 void InstallPlatformWebView(ApplicationContext& root) {
-  // WebKit 的 DMABUF 渲染器在宿主进程自带 GL/EGL 栈（HuxerUI 自绘管线）时，
-  // Web 内容纹理的跨上下文导入可能失败：加载照常完成（load-changed 到
-  // FINISHED），但合成层拿不到内容纹理，widget 只画出默认白底（空白预览）。
-  // 实验性驱动（如 INTEL_FORCE_PROBE 下的 Panther Lake iris）几乎必现。
-  // 默认禁用 DMABUF 渲染器、走共享内存合成（正确性优先）；用户显式设置过
-  // 该变量时（overwrite=0）尊重用户选择。
+  // WebKit's DMABUF renderer can fail to import its content texture when the
+  // host process owns a separate GL/EGL stack (HuxerUI's own render pipeline):
+  // loading reaches FINISHED but the compositor gets no texture and the widget
+  // only paints its default white background. Force the shared-memory path by
+  // default (correctness first) while respecting an explicit user choice.
   setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
   linux::PlatformViewFactory<WebViewProperties, LinuxWebViewInstance, WebViewController> factory{
-      .create = CreateLinuxWebView,
+      .create = [](auto* host, const WebViewProperties& properties, PlatformEventEmitter events) {
+        auto instance = CreateLinuxWebView(properties, std::move(events));
+        if constexpr (std::same_as<decltype(host), GtkWidget*>) {
+          if (host == nullptr || !GTK_IS_FIXED(host)) {
+            throw std::invalid_argument("HuxerUI WebView requires a GTK4 clipping container");
+          }
+          gtk_fixed_put(GTK_FIXED(host), GTK_WIDGET(instance->web_view), 0.0, 0.0);
+        } else {
+          WEBVIEW_UNUSED(host);
+        }
+        return instance;
+      },
       .view = [](const std::shared_ptr<LinuxWebViewInstance>& instance) -> GtkWidget* {
         return instance->web_view != nullptr ? GTK_WIDGET(instance->web_view) : nullptr;
       },

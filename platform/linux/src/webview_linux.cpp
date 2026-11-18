@@ -205,6 +205,10 @@ void CookiesReady(GObject* source, GAsyncResult* result, gpointer data) {
     g_error_free(error);
     return;
   }
+  if (cookies == nullptr) {
+    operation->completion(std::string{});
+    return;
+  }
   GSList* cookie_list = nullptr;
   for (GList* item = cookies; item != nullptr; item = item->next) {
     cookie_list = g_slist_prepend(cookie_list, item->data);
@@ -325,11 +329,13 @@ struct CookieListOperation {
 };
 
 WebViewCookie CookieFromSoup(SoupCookie* cookie) {
+  const char* name = soup_cookie_get_name(cookie);
+  const char* value = soup_cookie_get_value(cookie);
   const char* domain = soup_cookie_get_domain(cookie);
   const char* path = soup_cookie_get_path(cookie);
   WebViewCookie result{
-      .name = soup_cookie_get_name(cookie),
-      .value = soup_cookie_get_value(cookie),
+      .name = name != nullptr ? name : "",
+      .value = value != nullptr ? value : "",
       .domain = domain != nullptr ? domain : "",
       .path = path != nullptr ? path : "",
       .secure = soup_cookie_get_secure(cookie) != FALSE,
@@ -482,7 +488,9 @@ void CookiesListedForExactDelete(GObject* source, GAsyncResult* result, gpointer
   }
   for (GList* item = cookies; item != nullptr; item = item->next) {
     SoupCookie* cookie = static_cast<SoupCookie*>(item->data);
-    if (batch->name != soup_cookie_get_name(cookie) || batch->path != soup_cookie_get_path(cookie) ||
+    const char* name = soup_cookie_get_name(cookie);
+    const char* path = soup_cookie_get_path(cookie);
+    if (name == nullptr || path == nullptr || batch->name != name || batch->path != path ||
         !CookieDomainsEqual(batch->domain.c_str(), soup_cookie_get_domain(cookie))) continue;
     ++batch->pending;
     auto* deletion = new CookieDeleteExactItem{batch, soup_cookie_copy(cookie)};

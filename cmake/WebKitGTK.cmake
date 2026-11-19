@@ -15,7 +15,7 @@ function(huxerui_link_webkitgtk target_name)
     endif ()
     find_program(HUXERUI_WEBKITGTK_NINJA NAMES ninja ninja-build REQUIRED)
     pkg_check_modules(HUXERUI_WEBKITGTK_DEPS REQUIRED IMPORTED_TARGET
-            gtk4>=4.6 libsoup-3.0>=3.0
+            gtk4>=4.14 libsoup-3.0>=3.0
     )
 
     set(webkit_root "${CMAKE_CURRENT_BINARY_DIR}/_deps/webkitgtk")

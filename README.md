@@ -10,10 +10,9 @@ for navigation, custom requests, HTML content, JavaScript evaluation, page-to-ap
 browser state.
 
 The library uses the platform web engine and integrates it as a HuxerUI `PlatformView` on Android, iOS,
-macOS, Windows, Web, and Linux with the HuxerUI fork's GTK4 `PlatformView` host. The Linux backend uses WebKitGTK
-6.0 (2.40 or later) and requires a HuxerUI SDK build that provides `huxerui/linux/platform_registry.h`; current
-upstream HuxerUI 0.4.0 does not. On Linux with an SDK that lacks this host, `InstallWebView` throws
-`std::logic_error`.
+macOS, Windows, Web, and Linux. The Linux backend uses WebKitGTK 6.0 (2.40 or later) and requires a HuxerUI SDK
+build that provides `huxerui/linux/platform_registry.h` (HuxerUI 0.5.0 or later, or the fork's GTK4 `PlatformView`
+host). On Linux with an SDK that lacks this host (such as HuxerUI 0.4.0), `InstallWebView` throws `std::logic_error`.
 
 ## Preview
 
@@ -85,7 +84,7 @@ upstream HuxerUI 0.4.0 does not. On Linux with an SDK that lacks this host, `Ins
 | --- | --- | --- |
 | Android | Android WebView | Android API 23 or later |
 | iOS | WKWebView | iOS 15 or later |
-| Linux | WebKitGTK | Requires the HuxerUI fork's GTK4 `PlatformView` host and WebKitGTK 6.0 ≥ 2.40 |
+| Linux | WebKitGTK | WebKitGTK 6.0 (2.40 or later); requires HuxerUI 0.5.0 or later (or the fork's GTK4 `PlatformView` host) |
 | macOS | WKWebView | WebKit is linked by the library |
 | Windows | WebView2 | Downloads the WebView2 SDK when building and requires the WebView2 Runtime when running |
 | Web | iframe | Subject to browser embedding and cross-origin restrictions |
@@ -112,10 +111,6 @@ Include the public API with:
 
 On Windows, the first configure downloads the pinned Microsoft WebView2 SDK. Set `WEBVIEW2_SDK_ROOT` to an extracted
 Microsoft WebView2 NuGet package root to use a local SDK, including for offline builds.
-
-On Linux, the fork's GTK4 host enables the WebKitGTK backend. CMake uses WebKitGTK 6.0 ≥ 2.40 from `pkg-config`
-when available. The source fallback builds WebKitGTK 2.54.2 in the build directory and requires Ninja and the
-WebKitGTK build dependencies, including GTK4 and libsoup 3 development packages.
 
 ## Quick start
 
@@ -242,10 +237,10 @@ Windows, iOS, and macOS apply this preference before the initial navigation and 
 the `prefers-color-scheme` media query. Restoring `std::nullopt` returns to the system preference. On Windows, the
 override is scoped to each WebView2 instance and does not change shared Profile preferences.
 
-Android WebView follows the host application's `isLightTheme`; Linux WebKitGTK follows the host environment.
-Web uses iframe `color-scheme` propagation, so behavior depends on browser support and the embedded
-page's own color-scheme support. Cross-origin preference propagation does not grant DOM or script access, and normal
-iframe embedding policies still apply.
+Android WebView follows the host application's `isLightTheme`, and Linux WebKitGTK follows the host environment;
+explicit per-view Light and Dark overrides are unsupported. Web uses iframe `color-scheme` propagation, so behavior
+depends on browser support and the embedded page's own color-scheme support. Cross-origin preference propagation does
+not grant DOM or script access, and normal iframe embedding policies still apply.
 
 This is a preference, not algorithmic darkening: the library does not force-invert content or rewrite site CSS.
 
@@ -352,6 +347,27 @@ Receive it with:
 
 The message bridge does not make page content trusted. Validate message formats and enforce application authorization
 before performing privileged actions.
+
+## Linux backend
+
+Linux integrates WebKitGTK through HuxerUI's GTK `PlatformView` host (`huxerui/linux/platform_registry.h`, provided by
+HuxerUI 0.5.0 or later and the fork SDK; on SDKs without this host, `InstallWebView` throws `std::logic_error`). CMake
+first looks for WebKitGTK 6.0 (version 2.40 or later) through `pkg-config`. If it is not installed, the build downloads
+WebKitGTK 2.54.2 from the official release archive, verifies its SHA-256, and builds and installs it under the build
+directory without administrator access. Installing the distribution's WebKitGTK development package avoids building the
+browser engine from source.
+
+The source fallback requires Ninja and the WebKitGTK build dependencies, including the system GTK 4 and libsoup 3
+development packages. See the [upstream build instructions](https://docs.webkit.org/Build%20%26%20Debug/BuildOptions.html).
+Keep the generated installation with its libraries, helper processes, and resources available when running applications
+that use the downloaded engine.
+
+The backend supports URL and HTML loading, GET requests with custom headers, JavaScript evaluation, navigation events,
+platform cookie management through `WebKitCookieManager`, and the `window.huxerui.postMessage` bridge. WebKitGTK does
+not expose setters for a navigation request's method or body, so non-GET requests and request bodies emit a load error.
+
+DMABUF rendering is disabled by default for compatibility with the host renderer; an explicitly set
+`WEBKIT_DISABLE_DMABUF_RENDERER` value takes precedence.
 
 ## Preview application
 

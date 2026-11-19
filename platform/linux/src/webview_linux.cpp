@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,8 +21,9 @@
 #undef linux
 #endif
 
-#include <huxerui/linux/platform_registry.h>
 #include <huxerui/webview.h>
+
+#include <huxerui/linux/platform_registry.h>
 
 #include "detail/webview_internal.h"
 
@@ -849,7 +851,7 @@ void InstallPlatformWebView(ApplicationContext& root) {
         WebViewControllerAccess::Disconnect(controller);
       },
   };
-  root.RegisterPlatformView<WebViewProperties, WebViewController>(std::string(web_view_type), std::move(factory));
+  root.RegisterPlatformView<WebViewProperties, WebViewController>(web_view_type, std::move(factory));
 }
 
 } // namespace huxerui::detail
